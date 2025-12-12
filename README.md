@@ -45,7 +45,7 @@
 ---
 
 ## 技术栈
-- **语言**: Python 3.x
+- **语言**: Python 3.8
 - **GUI 框架**: PySide6 (Qt WebEngine)
 - **网络请求**: Requests
 - **HTML 解析**: BeautifulSoup4, lxml
@@ -106,4 +106,8 @@ python main.py
   - 系统会自动去除 "官网"、"·" 等冗余字符，只保留核心分类名。
 - **没有PYTHON环境？**
   - 查询百度或者bilibili有各种安装教程
+- **有没有不用安装Python环境的运行办法？**
+  - 你猜build.bat是用来干嘛的，但是这个也需要在有python环境的电脑中运行，运行后会生成disk文件夹，将文件夹里面的所有内容压缩打包分发给其他用户，其他用户解压后就可在没有Python环境的情况下直接运行.exe文件
+- **为什么我不直接打包.exe文件？**
+  - PySide6的库包太大了
   
