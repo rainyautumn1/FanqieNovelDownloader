@@ -1,0 +1,13 @@
+__pycache__/
+dist/
+build/
+*.spec
+cookies.json
+browser_data/
+downloads/
+.DS_Store
+.idea/
+.vscode/
+venv/
+env/
+*.pyc
