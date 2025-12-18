@@ -111,3 +111,9 @@ python main.py
 - **为什么我不直接打包.exe文件？**
   - PySide6的库包太大了
   
+---
+
+## 许可证
+
+本项目基于 [MIT License](LICENSE) 开源。
+
