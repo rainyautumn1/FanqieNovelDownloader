@@ -1,10 +1,16 @@
-# 番茄小说内容下载器 (Fanqie Novel Downloader)
+# 番茄小说下载器 (Fanqie Novel Downloader)
 
 [![License](https://img.shields.io/github/license/rainyautumn1/FanqieNovelDownloader?style=flat-square)](LICENSE)
 [![Changelog](https://img.shields.io/badge/Changelog-View%20Updates-blue?style=flat-square)](CHANGELOG.md)
+![Python](https://img.shields.io/badge/Python-3.8%2B-blue)
+![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey)
 
 ## 简介
-这是一个基于 Python (PySide6) 开发的高级番茄小说内容下载工具。它集成了内置浏览器，支持用户直接浏览番茄小说网，登录 SVIP 账号以获取完整内容，并提供灵活的单本与批量下载功能。
+这是一个基于 Python (PySide6) 开发的高级**番茄小说下载工具**（Tomato Novel Downloader）。
+它集成了内置浏览器，支持用户直接浏览**番茄小说网 (番茄免费小说)**，支持 **SVIP 账号登录**以获取完整内容。
+软件提供灵活的**单本下载**与**榜单批量下载**功能，支持将小说导出为 **TXT**、**EPUB**、**Markdown** 等格式，是您备份和离线阅读番茄小说的最佳助手。
+
+**核心关键词**: 番茄小说下载, 番茄免费小说, 小说爬虫, 批量下载, 导出EPUB, TXT下载, 离线阅读, 电子书制作
 
 **⚠️ 重要免责声明**
 1. **仅供学习研究**: 本工具仅供个人学习 Python 网络爬虫技术、GUI 开发及研究使用。
