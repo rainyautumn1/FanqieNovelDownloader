@@ -91,8 +91,9 @@ class BatchDownloadWorker(QThread):
                     
                     # 定义回调
                     def callback(curr, tot, title):
-                        # 我们定期更新日志或保持静默以避免刷屏
-                        pass
+                        # 发送详细进度信息：[第几本/共几本] 书名 (第几章/共几章)
+                        status_msg = f"正在下载 [{i+1}/{total_books}]: {real_title} ({curr}/{tot} 章)"
+                        self.progress_signal.emit(i, total_books, status_msg)
                     
                     # 保存
                     if self.fmt == 'txt':
@@ -150,6 +151,23 @@ class BatchDownloadWorker(QThread):
             else:
                 self.error_signal.emit(f"批量下载出错: {str(e)}")
 
+# 获取榜单/分类书籍列表的工作线程
+class RankParserWorker(QThread):
+    finished_signal = Signal(list)
+    error_signal = Signal(str)
+
+    def __init__(self, downloader, rank_url):
+        super().__init__()
+        self.downloader = downloader
+        self.rank_url = rank_url
+
+    def run(self):
+        try:
+            books = self.downloader.get_rank_books(self.rank_url)
+            self.finished_signal.emit(books)
+        except Exception as e:
+            self.error_signal.emit(str(e))
+
 # 获取书籍信息的工作线程
 class BookInfoWorker(QThread):
     finished_signal = Signal(dict)
@@ -174,7 +192,7 @@ class DownloadWorker(QThread):
     finished_signal = Signal(str) # 文件路径
     error_signal = Signal(str)
 
-    def __init__(self, downloader, book_url, save_dir, fmt, book_info=None, chapter_indices=None, split_files=False, delay=-1):
+    def __init__(self, downloader, book_url, save_dir, fmt, book_info=None, chapter_indices=None, split_files=False, delay=-1, chapter_limit=0):
         super().__init__()
         self.downloader = downloader
         self.book_url = book_url
@@ -184,6 +202,7 @@ class DownloadWorker(QThread):
         self.chapter_indices = chapter_indices
         self.split_files = split_files
         self.delay = delay
+        self.chapter_limit = chapter_limit
         self.is_paused = False
         self.is_stopped = False
 
@@ -219,6 +238,12 @@ class DownloadWorker(QThread):
             self.log_signal.emit(f"书名: {self.book_info['title']}")
             self.log_signal.emit(f"作者: {self.book_info['author']}")
             
+            # 处理章节限制
+            if self.chapter_limit > 0 and not self.chapter_indices:
+                limit = min(self.chapter_limit, len(self.book_info['chapters']))
+                self.chapter_indices = list(range(limit))
+                self.log_signal.emit(f"根据设置，仅下载前 {limit} 章")
+
             chapters_to_download_count = len(self.chapter_indices) if self.chapter_indices else len(self.book_info['chapters'])
             self.log_signal.emit(f"计划下载章节数: {chapters_to_download_count}")
 

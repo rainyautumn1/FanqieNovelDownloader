@@ -261,20 +261,24 @@ class FanqieDownloader:
         """
         try:
             response = requests.get(url, headers=self.headers, cookies=self.cookies)
+            response.encoding = 'utf-8'
             response.raise_for_status()
             soup = BeautifulSoup(response.text, 'lxml')
             
             # 尝试获取标题
             title_tag = soup.select_one('.info-name h1') or soup.select_one('h1')
             title = title_tag.get_text(strip=True) if title_tag else "Unknown_Book"
+            title = self.decode_text(title)
             
             # 尝试获取作者
             author_tag = soup.select_one('.author-name-text')
             author = author_tag.get_text(strip=True) if author_tag else "Unknown_Author"
+            author = self.decode_text(author)
 
             # 尝试获取简介
             intro_tag = soup.select_one('.page-abstract-content')
             introduction = intro_tag.get_text(strip=True) if intro_tag else "No introduction available."
+            introduction = self.decode_text(introduction)
 
             # 获取章节
             chapters = []
@@ -307,6 +311,7 @@ class FanqieDownloader:
         """
         try:
             response = requests.get(url, headers=self.headers, cookies=self.cookies)
+            response.encoding = 'utf-8'
             response.raise_for_status()
             soup = BeautifulSoup(response.text, 'lxml')
             
@@ -378,6 +383,7 @@ class FanqieDownloader:
         """
         try:
             response = requests.get(category_url, headers=self.headers, cookies=self.cookies)
+            response.encoding = 'utf-8' # 强制使用 UTF-8，防止中文乱码
             response.raise_for_status()
             soup = BeautifulSoup(response.text, 'lxml')
             
@@ -386,29 +392,52 @@ class FanqieDownloader:
             # 寻找包含 /page/ 的链接
             
             # 使用集合避免重复（图片链接 + 标题链接）
-            seen_urls = set()
             
             # 如果可能，更精确地查找书籍项目
             # 常见结构: .rank-book-list .book-item a
             
             # 让我们搜索所有 href 包含 '/page/' 的 'a' 标签
+            # 使用字典来跟踪已添加的书籍，以便在找到更好的标题（如图片alt）时更新
+            seen_books = {} # url -> {'index': int, 'from_img': bool}
+
             for link in soup.find_all('a'):
                 href = link.get('href')
                 if href and '/page/' in href:
                     full_url = 'https://fanqienovel.com' + href if not href.startswith('http') else href
-                    if full_url not in seen_urls:
-                        # 如果可能，提取标题
+                    
+                    title = ""
+                    from_img = False
+
+                    # 1. 优先尝试从图片 alt 获取标题 (通常最准确且无干扰)
+                    img = link.find('img')
+                    if img and img.get('alt'):
+                        title = img.get('alt')
+                        from_img = True
+                    
+                    # 2. 其次尝试直接获取文本
+                    if not title:
                         title = link.get_text(strip=True)
-                        if not title:
-                            # 尝试在子元素或 alt 属性中查找标题
-                            img = link.find('img')
-                            if img and img.get('alt'):
-                                title = img.get('alt')
-                            else:
-                                title = "Unknown Title"
-                        
+                    
+                    if not title:
+                        title = "Unknown Title"
+
+                    # 3. 尝试解码标题（处理混淆字符）
+                    title = self.decode_text(title)
+
+                    # 4. 简单的标题清理
+                    # 如果标题包含中文且有空格，可能是格式问题，尝试去除空格
+                    if title and any('\u4e00' <= char <= '\u9fff' for char in title):
+                         title = "".join(title.split())
+
+                    if full_url in seen_books:
+                        # 如果已经存在，检查是否可以用更高质量的标题（来自图片）覆盖
+                        entry = seen_books[full_url]
+                        if not entry['from_img'] and from_img:
+                             books[entry['index']]['title'] = title
+                             entry['from_img'] = True
+                    else:
                         books.append({'title': title, 'url': full_url})
-                        seen_urls.add(full_url)
+                        seen_books[full_url] = {'index': len(books)-1, 'from_img': from_img}
             
             return books
         except Exception as e:

@@ -12,13 +12,26 @@ class BatchOptionsDialog(QDialog):
     def setup_ui(self):
         layout = QVBoxLayout(self)
         
-        # 前 N 本
+        # 书籍范围
         h1 = QHBoxLayout()
-        h1.addWidget(QLabel("下载当前页前 N 本书:"))
-        self.spin_top_n = QSpinBox()
-        self.spin_top_n.setRange(1, 100)
-        self.spin_top_n.setValue(5)
-        h1.addWidget(self.spin_top_n)
+        h1.addWidget(QLabel("下载当前页书籍范围:"))
+        
+        self.spin_book_start = QSpinBox()
+        self.spin_book_start.setRange(1, 30)
+        self.spin_book_start.setValue(1)
+        self.spin_book_start.setPrefix("第 ")
+        self.spin_book_start.setSuffix(" 本")
+        
+        h1.addWidget(self.spin_book_start)
+        h1.addWidget(QLabel(" 到 "))
+        
+        self.spin_book_end = QSpinBox()
+        self.spin_book_end.setRange(1, 30)
+        self.spin_book_end.setValue(5)
+        self.spin_book_end.setPrefix("第 ")
+        self.spin_book_end.setSuffix(" 本")
+        
+        h1.addWidget(self.spin_book_end)
         layout.addLayout(h1)
         
         # 章节限制
@@ -89,7 +102,12 @@ class BatchOptionsDialog(QDialog):
 
     def get_data(self):
         delay = -1 if self.combo_delay.currentIndex() == 0 else self.spin_delay.value()
-        return self.spin_top_n.value(), self.spin_chapter_limit.value(), self.combo_fmt.currentText(), self.check_split.isChecked(), delay
+        start = self.spin_book_start.value()
+        end = self.spin_book_end.value()
+        # 自动纠正大小
+        if start > end:
+            start, end = end, start
+        return start, end, self.spin_chapter_limit.value(), self.combo_fmt.currentText(), self.check_split.isChecked(), delay
 
 class CustomWebEnginePage(QWebEnginePage):
     """自定义页面以在同一视图中打开链接而不是新标签页"""
@@ -156,6 +174,15 @@ class ChapterSelectionDialog(QDialog):
         # 文件保存选项
         file_box = QGroupBox("文件保存选项")
         file_layout = QVBoxLayout(file_box)
+        
+        # 格式选择
+        h_fmt = QHBoxLayout()
+        h_fmt.addWidget(QLabel("保存格式:"))
+        self.combo_fmt = QComboBox()
+        self.combo_fmt.addItems(["txt", "epub", "md"])
+        h_fmt.addWidget(self.combo_fmt)
+        file_layout.addLayout(h_fmt)
+
         self.check_split = QCheckBox("分章保存 (每章一个文件)")
         self.check_split.setToolTip("仅TXT/MD格式有效")
         file_layout.addWidget(self.check_split)
@@ -208,13 +235,14 @@ class ChapterSelectionDialog(QDialog):
             self.lbl_delay_tip.setText("⚠️ 警告: 间隔过短(<1s)极易触发验证码风控，请谨慎设置！")
         
     def get_data(self):
-        # 返回 (indices, split_files, delay)
+        # 返回 (indices, split_files, delay, fmt)
         # indices 是基于0的索引列表，或 None 表示全部
         split = self.check_split.isChecked()
         delay = -1 if self.combo_delay.currentIndex() == 0 else self.spin_delay.value()
+        fmt = self.combo_fmt.currentText()
         
         if self.radio_all.isChecked():
-            return None, split, delay
+            return None, split, delay, fmt
             
         indices = []
         if self.radio_range.isChecked():
@@ -237,4 +265,4 @@ class ChapterSelectionDialog(QDialog):
                     pass
             indices = sorted(list(set(indices)))
             
-        return indices, split, delay
+        return indices, split, delay, fmt

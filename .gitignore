@@ -11,3 +11,8 @@ downloads/
 venv/
 env/
 *.pyc
+
+# Logs
+logs/
+test_logs/
+*.log
