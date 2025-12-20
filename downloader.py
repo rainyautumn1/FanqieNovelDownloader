@@ -5,10 +5,208 @@ import os
 import re
 import random
 from ebooklib import epub
+from abc import ABC, abstractmethod
 
 class VerificationError(Exception):
     """当检测到验证码或风控时抛出"""
     pass
+
+# --- 策略模式：格式化器 ---
+
+class BookFormatter(ABC):
+    @abstractmethod
+    def initialize(self, book_data, save_dir, split_files):
+        """
+        初始化保存环境。
+        返回: context (上下文对象，用于后续步骤)
+        """
+        pass
+
+    @abstractmethod
+    def write_chapter(self, context, chapter_data, content, index):
+        """
+        写入单个章节。
+        """
+        pass
+
+    @abstractmethod
+    def finalize(self, context):
+        """
+        完成保存。
+        返回: 最终文件或目录的路径
+        """
+        pass
+
+class TxtFormatter(BookFormatter):
+    def initialize(self, book_data, save_dir, split_files):
+        context = {
+            'book_data': book_data,
+            'save_dir': save_dir,
+            'split_files': split_files,
+            'files_created': []
+        }
+        
+        if split_files:
+            # 创建目录
+            book_folder = os.path.join(save_dir, book_data['title'])
+            if not os.path.exists(book_folder):
+                os.makedirs(book_folder)
+            context['target_dir'] = book_folder
+            
+            # 写简介
+            intro_path = os.path.join(book_folder, "000_简介.txt")
+            with open(intro_path, 'w', encoding='utf-8') as f:
+                f.write(f"Title: {book_data['title']}\n")
+                f.write(f"Author: {book_data['author']}\n")
+                f.write("="*20 + "\n\n")
+                f.write(f"{book_data.get('introduction', '')}\n")
+        else:
+            # 单文件
+            filename = f"{book_data['title']}.txt"
+            filepath = os.path.join(save_dir, filename)
+            f = open(filepath, 'w', encoding='utf-8')
+            f.write(f"Title: {book_data['title']}\n")
+            f.write(f"Author: {book_data['author']}\n")
+            f.write("="*20 + "\n\n")
+            f.write(f"简介:\n{book_data.get('introduction', '')}\n")
+            f.write("="*20 + "\n\n")
+            context['file_handle'] = f
+            context['filepath'] = filepath
+            
+        return context
+
+    def write_chapter(self, context, chapter_data, content, index):
+        if context['split_files']:
+            # 分文件
+            safe_title = re.sub(r'[\\/*?:"<>|]', "", chapter_data['title'])
+            filename = f"{index+1:03d}_{safe_title}.txt"
+            filepath = os.path.join(context['target_dir'], filename)
+            
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(content)
+            context['files_created'].append(filepath)
+        else:
+            # 单文件
+            f = context['file_handle']
+            f.write(f"\n\n=== {chapter_data['title']} ===\n\n")
+            f.write(content)
+
+    def finalize(self, context):
+        if context['split_files']:
+            return context['target_dir']
+        else:
+            context['file_handle'].close()
+            return context['filepath']
+
+class MdFormatter(BookFormatter):
+    def initialize(self, book_data, save_dir, split_files):
+        context = {
+            'book_data': book_data,
+            'save_dir': save_dir,
+            'split_files': split_files,
+            'files_created': []
+        }
+        
+        if split_files:
+            book_folder = os.path.join(save_dir, book_data['title'])
+            if not os.path.exists(book_folder):
+                os.makedirs(book_folder)
+            context['target_dir'] = book_folder
+            
+            intro_path = os.path.join(book_folder, "000_简介.md")
+            with open(intro_path, 'w', encoding='utf-8') as f:
+                f.write(f"# {book_data['title']}\n")
+                f.write(f"**Author:** {book_data['author']}\n\n")
+                f.write("## 简介\n\n")
+                f.write(f"{book_data.get('introduction', '')}\n")
+        else:
+            filename = f"{book_data['title']}.md"
+            filepath = os.path.join(save_dir, filename)
+            f = open(filepath, 'w', encoding='utf-8')
+            f.write(f"# {book_data['title']}\n")
+            f.write(f"**Author:** {book_data['author']}\n\n")
+            f.write("## 简介\n\n")
+            f.write(f"{book_data.get('introduction', '')}\n\n")
+            f.write("---\n\n")
+            context['file_handle'] = f
+            context['filepath'] = filepath
+            
+        return context
+
+    def write_chapter(self, context, chapter_data, content, index):
+        if context['split_files']:
+            safe_title = re.sub(r'[\\/*?:"<>|]', "", chapter_data['title'])
+            filename = f"{index+1:03d}_{safe_title}.md"
+            filepath = os.path.join(context['target_dir'], filename)
+            
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(f"# {chapter_data['title']}\n\n")
+                f.write(content)
+            context['files_created'].append(filepath)
+        else:
+            f = context['file_handle']
+            f.write(f"## {chapter_data['title']}\n\n")
+            f.write(content)
+            f.write("\n\n")
+
+    def finalize(self, context):
+        if context['split_files']:
+            return context['target_dir']
+        else:
+            context['file_handle'].close()
+            return context['filepath']
+
+class EpubFormatter(BookFormatter):
+    def initialize(self, book_data, save_dir, split_files):
+        # EPUB 忽略 split_files
+        book = epub.EpubBook()
+        book.set_identifier(f'fanqie-{int(time.time())}')
+        book.set_title(book_data['title'])
+        book.set_language('zh')
+        book.add_author(book_data['author'])
+        book.add_metadata('DC', 'description', book_data.get('introduction', ''))
+        
+        spine = []
+        toc = []
+        
+        # 简介
+        intro_content = book_data.get('introduction', '').replace('\n', '<br/>')
+        c_intro = epub.EpubHtml(title='简介', file_name='intro.xhtml', lang='zh')
+        c_intro.content = f'<h1>简介</h1><p>{intro_content}</p>'
+        book.add_item(c_intro)
+        spine.append(c_intro)
+        toc.append(c_intro)
+        
+        return {
+            'book': book,
+            'spine': spine,
+            'toc': toc,
+            'save_dir': save_dir,
+            'title': book_data['title']
+        }
+
+    def write_chapter(self, context, chapter_data, content, index):
+        html_content = "".join([f"<p>{line}</p>" for line in content.split('\n\n')])
+        c = epub.EpubHtml(title=chapter_data['title'], file_name=f'chap_{index+1}.xhtml', lang='zh')
+        c.content = f'<h1>{chapter_data["title"]}</h1>{html_content}'
+        
+        context['book'].add_item(c)
+        context['spine'].append(c)
+        context['toc'].append(c)
+
+    def finalize(self, context):
+        book = context['book']
+        book.toc = context['toc']
+        book.add_item(epub.EpubNcx())
+        book.add_item(epub.EpubNav())
+        book.spine = ['nav'] + context['spine']
+        
+        filename = f"{context['title']}.epub"
+        filepath = os.path.join(context['save_dir'], filename)
+        epub.write_epub(filepath, book)
+        return filepath
+
+# --- 主下载器类 ---
 
 class FanqieDownloader:
     def __init__(self, cookies=None):
@@ -216,12 +414,16 @@ class FanqieDownloader:
         except Exception as e:
             raise Exception(f"获取排行榜书籍失败: {str(e)}")
 
-    def save_to_txt(self, book_data, save_dir, progress_callback=None, chapter_indices=None, split_files=False, control_callback=None):
+    def _sleep(self, delay):
+        """通用休眠逻辑"""
+        if delay < 0:
+            time.sleep(random.triangular(0.5, 1.0, 0.5))
+        else:
+            time.sleep(delay)
+
+    def save_book(self, book_data, save_dir, formatter, chapter_indices=None, split_files=False, control_callback=None, delay=-1, progress_callback=None):
         """
-        保存书籍为 TXT 格式。
-        chapter_indices: 要下载的章节索引列表（从0开始）。如果为 None，则下载所有章节。
-        split_files: 如果为 True，则将每一章保存为一个单独的文件。
-        control_callback: 在下载每一章之前调用的函数，用于检查暂停/停止状态。
+        通用的书籍保存方法，使用策略模式。
         """
         chapters_to_download = []
         if chapter_indices:
@@ -233,22 +435,11 @@ class FanqieDownloader:
 
         total_chapters = len(chapters_to_download)
         
-        if split_files:
-            # 为书籍创建一个文件夹
-            book_folder = os.path.join(save_dir, book_data['title'])
-            if not os.path.exists(book_folder):
-                os.makedirs(book_folder)
-            
-            # 保存简介
-            intro_filepath = os.path.join(book_folder, "000_简介.txt")
-            with open(intro_filepath, 'w', encoding='utf-8') as f:
-                f.write(f"Title: {book_data['title']}\n")
-                f.write(f"Author: {book_data['author']}\n")
-                f.write("="*20 + "\n\n")
-                f.write(f"{book_data.get('introduction', '')}\n")
-
-            saved_paths = []
-            
+        # 1. 初始化
+        context = formatter.initialize(book_data, save_dir, split_files)
+        
+        try:
+            # 2. 循环下载
             for i, chapter in enumerate(chapters_to_download):
                 if control_callback:
                     control_callback()
@@ -258,180 +449,29 @@ class FanqieDownloader:
                 
                 content = self.get_chapter_content(chapter['url'])
                 
-                # 清理文件名
-                safe_title = re.sub(r'[\\/*?:"<>|]', "", chapter['title'])
-                filename = f"{i+1:03d}_{safe_title}.txt"
-                filepath = os.path.join(book_folder, filename)
+                # 3. 写入章节
+                formatter.write_chapter(context, chapter, content, i)
                 
-                with open(filepath, 'w', encoding='utf-8') as f:
-                    f.write(content)
-                
-                saved_paths.append(filepath)
-                time.sleep(random.triangular(0.5, 1.0, 0.5))
-                
-            return book_folder # 返回目录路径
+                # 4. 休眠
+                self._sleep(delay)
             
-        else:
-            # 单个文件
-            filename = f"{book_data['title']}.txt"
-            filepath = os.path.join(save_dir, filename)
+            # 5. 完成
+            return formatter.finalize(context)
             
-            with open(filepath, 'w', encoding='utf-8') as f:
-                f.write(f"Title: {book_data['title']}\n")
-                f.write(f"Author: {book_data['author']}\n")
-                f.write("="*20 + "\n\n")
-                f.write(f"简介:\n{book_data.get('introduction', '')}\n")
-                f.write("="*20 + "\n\n")
-                
-                for i, chapter in enumerate(chapters_to_download):
-                    if control_callback:
-                        control_callback()
+        except Exception as e:
+            # 这里可以添加清理逻辑，例如关闭文件句柄
+            if isinstance(context, dict) and 'file_handle' in context:
+                try:
+                    context['file_handle'].close()
+                except:
+                    pass
+            raise e
 
-                    if progress_callback:
-                        progress_callback(i + 1, total_chapters, chapter['title'])
-                    
-                    content = self.get_chapter_content(chapter['url'])
-                    f.write(f"\n\n=== {chapter['title']} ===\n\n")
-                    f.write(content)
-                    time.sleep(random.triangular(0.5, 1.0, 0.5))
+    def save_to_txt(self, book_data, save_dir, progress_callback=None, chapter_indices=None, split_files=False, control_callback=None, delay=-1):
+        return self.save_book(book_data, save_dir, TxtFormatter(), chapter_indices, split_files, control_callback, delay, progress_callback)
 
-            return filepath
+    def save_to_md(self, book_data, save_dir, progress_callback=None, chapter_indices=None, split_files=False, control_callback=None, delay=-1):
+        return self.save_book(book_data, save_dir, MdFormatter(), chapter_indices, split_files, control_callback, delay, progress_callback)
 
-    def save_to_md(self, book_data, save_dir, progress_callback=None, chapter_indices=None, split_files=False, control_callback=None):
-        """
-        保存书籍为 MD (Markdown) 格式。
-        """
-        chapters_to_download = []
-        if chapter_indices:
-             for idx in chapter_indices:
-                 if 0 <= idx < len(book_data['chapters']):
-                     chapters_to_download.append(book_data['chapters'][idx])
-        else:
-            chapters_to_download = book_data['chapters']
-
-        total_chapters = len(chapters_to_download)
-        
-        if split_files:
-            # 为书籍创建一个文件夹
-            book_folder = os.path.join(save_dir, book_data['title'])
-            if not os.path.exists(book_folder):
-                os.makedirs(book_folder)
-            
-            # 保存简介
-            intro_filepath = os.path.join(book_folder, "000_简介.md")
-            with open(intro_filepath, 'w', encoding='utf-8') as f:
-                f.write(f"# {book_data['title']}\n")
-                f.write(f"**Author:** {book_data['author']}\n\n")
-                f.write("## 简介\n\n")
-                f.write(f"{book_data.get('introduction', '')}\n")
-
-            for i, chapter in enumerate(chapters_to_download):
-                if control_callback:
-                    control_callback()
-
-                if progress_callback:
-                    progress_callback(i + 1, total_chapters, chapter['title'])
-                
-                content = self.get_chapter_content(chapter['url'])
-                
-                # 清理文件名
-                safe_title = re.sub(r'[\\/*?:"<>|]', "", chapter['title'])
-                filename = f"{i+1:03d}_{safe_title}.md"
-                filepath = os.path.join(book_folder, filename)
-                
-                with open(filepath, 'w', encoding='utf-8') as f:
-                    f.write(f"# {chapter['title']}\n\n")
-                    f.write(content)
-                
-                time.sleep(random.triangular(0.5, 1.0, 0.5))
-                
-            return book_folder
-            
-        else:
-            # 单个文件
-            filename = f"{book_data['title']}.md"
-            filepath = os.path.join(save_dir, filename)
-            
-            with open(filepath, 'w', encoding='utf-8') as f:
-                f.write(f"# {book_data['title']}\n")
-                f.write(f"**Author:** {book_data['author']}\n\n")
-                f.write("## 简介\n\n")
-                f.write(f"{book_data.get('introduction', '')}\n\n")
-                f.write("---\n\n")
-                
-                for i, chapter in enumerate(chapters_to_download):
-                    if control_callback:
-                        control_callback()
-
-                    if progress_callback:
-                        progress_callback(i + 1, total_chapters, chapter['title'])
-                    
-                    content = self.get_chapter_content(chapter['url'])
-                    f.write(f"## {chapter['title']}\n\n")
-                    f.write(content)
-                    f.write("\n\n")
-                    time.sleep(random.triangular(0.5, 1.0, 0.5))
-
-            return filepath
-
-    def save_to_epub(self, book_data, save_dir, progress_callback=None, chapter_indices=None, control_callback=None):
-        # EPUB 不支持以相同方式分割文件（它本身就是一个 zip），
-        # 但我们可以支持部分下载。
-        
-        chapters_to_download = []
-        if chapter_indices:
-             for idx in chapter_indices:
-                 if 0 <= idx < len(book_data['chapters']):
-                     chapters_to_download.append(book_data['chapters'][idx])
-        else:
-            chapters_to_download = book_data['chapters']
-
-        book = epub.EpubBook()
-        book.set_identifier(f'fanqie-{int(time.time())}')
-        book.set_title(book_data['title'])
-        book.set_language('zh')
-        book.add_author(book_data['author'])
-        
-        # 将简介添加到描述元数据中
-        book.add_metadata('DC', 'description', book_data.get('introduction', ''))
-
-        spine = []
-        toc = []
-
-        # 添加简介章节
-        intro_content = book_data.get('introduction', '').replace('\n', '<br/>')
-        c_intro = epub.EpubHtml(title='简介', file_name='intro.xhtml', lang='zh')
-        c_intro.content = f'<h1>简介</h1><p>{intro_content}</p>'
-        book.add_item(c_intro)
-        spine.append(c_intro)
-        toc.append(c_intro)
-
-        total_chapters = len(chapters_to_download)
-        for i, chapter in enumerate(chapters_to_download):
-            if control_callback:
-                control_callback()
-
-            if progress_callback:
-                progress_callback(i + 1, total_chapters, chapter['title'])
-
-            content = self.get_chapter_content(chapter['url'])
-            # 将换行符转换为 HTML 段落
-            html_content = "".join([f"<p>{line}</p>" for line in content.split('\n\n')])
-            
-            c = epub.EpubHtml(title=chapter['title'], file_name=f'chap_{i+1}.xhtml', lang='zh')
-            c.content = f'<h1>{chapter["title"]}</h1>{html_content}'
-            book.add_item(c)
-            spine.append(c)
-            toc.append(c)
-            time.sleep(random.triangular(0.5, 1.0, 0.5)) # 礼貌等待
-
-        book.toc = toc
-        book.add_item(epub.EpubNcx())
-        book.add_item(epub.EpubNav())
-        book.spine = ['nav'] + spine
-
-        filename = f"{book_data['title']}.epub"
-        filepath = os.path.join(save_dir, filename)
-        epub.write_epub(filepath, book)
-        
-        return filepath
+    def save_to_epub(self, book_data, save_dir, progress_callback=None, chapter_indices=None, control_callback=None, delay=-1):
+        return self.save_book(book_data, save_dir, EpubFormatter(), chapter_indices, False, control_callback, delay, progress_callback)

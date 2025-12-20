@@ -1,443 +1,16 @@
 import sys
 import os
-import time
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QLineEdit, QPushButton, QProgressBar, 
-                             QTextEdit, QLabel, QMessageBox, QComboBox, QDialog,
-                             QGroupBox, QRadioButton, QCheckBox, QSpinBox, QTabWidget)
-from PySide6.QtCore import QUrl, QThread, Signal, Slot, Qt, QTimer
+                             QTextEdit, QLabel, QMessageBox, QComboBox)
+from PySide6.QtCore import QUrl, Qt
 from PySide6.QtNetwork import QNetworkCookie
-from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage
+from PySide6.QtWebEngineCore import QWebEngineProfile
 import json
 
-from downloader import FanqieDownloader, VerificationError
-
-# 批量下载工作线程
-class BatchDownloadWorker(QThread):
-    progress_signal = Signal(int, int, str) # 当前书籍索引, 总书籍数, 当前状态
-    log_signal = Signal(str)
-    finished_signal = Signal(str) # 摘要
-    error_signal = Signal(str)
-
-    def __init__(self, downloader, rank_url, save_dir, top_n=5, chapters_count=0, fmt='txt', split_files=False):
-        super().__init__()
-        self.downloader = downloader
-        self.rank_url = rank_url
-        self.save_dir = save_dir
-        self.top_n = top_n
-        self.chapters_count = chapters_count # 0 表示全部
-        self.fmt = fmt
-        self.split_files = split_files
-        self.is_paused = False
-        self.is_stopped = False
-
-    def pause(self):
-        self.is_paused = True
-        self.log_signal.emit("批量下载已暂停")
-
-    def resume(self):
-        self.is_paused = False
-        self.log_signal.emit("批量下载继续")
-
-    def stop(self):
-        self.is_stopped = True
-        self.is_paused = False
-        self.log_signal.emit("正在停止批量下载...")
-
-    def check_control_status(self):
-        if self.is_stopped:
-            raise Exception("用户停止下载")
-        
-        while self.is_paused:
-            time.sleep(0.1)
-            if self.is_stopped:
-                raise Exception("用户停止下载")
-
-    def run(self):
-        try:
-            self.log_signal.emit(f"正在分析榜单页面: {self.rank_url}")
-            books = self.downloader.get_rank_books(self.rank_url)
-            
-            if not books:
-                self.error_signal.emit("未在当前页面找到书籍链接，请确认这是榜单/书库页面。")
-                return
-
-            # 应用前 N 本限制
-            target_books = books[:self.top_n]
-            total_books = len(target_books)
-            
-            self.log_signal.emit(f"发现 {len(books)} 本书，将下载前 {total_books} 本")
-            
-            # 创建目录
-            if not os.path.exists(self.save_dir):
-                os.makedirs(self.save_dir)
-
-            success_count = 0
-
-            for i, book in enumerate(target_books):
-                # 在书籍之间检查状态
-                self.check_control_status()
-
-                try:
-                    self.log_signal.emit(f"[{i+1}/{total_books}] 正在获取书籍信息: {book['url']}")
-                    self.progress_signal.emit(i, total_books, f"正在获取信息: {book.get('title', 'Unknown')}")
-                    
-                    # 获取书籍信息 (获取真实标题)
-                    book_info = self.downloader.get_book_info(book['url'])
-                    real_title = book_info['title']
-                    
-                    self.log_signal.emit(f"[{i+1}/{total_books}] 开始下载: {real_title}")
-                    self.progress_signal.emit(i, total_books, f"正在下载: {real_title}")
-                    
-                    # 确定章节
-                    indices = None
-                    if self.chapters_count > 0:
-                        limit = min(self.chapters_count, len(book_info['chapters']))
-                        indices = list(range(limit))
-                        self.log_signal.emit(f"  - 仅下载前 {limit} 章")
-                    
-                    # 定义回调
-                    def callback(curr, tot, title):
-                        # 我们定期更新日志或保持静默以避免刷屏
-                        pass
-                    
-                    # 保存
-                    if self.fmt == 'txt':
-                        filepath = self.downloader.save_to_txt(
-                            book_info, 
-                            self.save_dir, 
-                            callback,
-                            chapter_indices=indices,
-                            split_files=self.split_files,
-                            control_callback=self.check_control_status
-                        )
-                    elif self.fmt == 'md':
-                        filepath = self.downloader.save_to_md(
-                            book_info, 
-                            self.save_dir, 
-                            callback,
-                            chapter_indices=indices,
-                            split_files=self.split_files,
-                            control_callback=self.check_control_status
-                        )
-                    else: # epub格式
-                        filepath = self.downloader.save_to_epub(
-                            book_info, 
-                            self.save_dir, 
-                            callback,
-                            chapter_indices=indices,
-                            control_callback=self.check_control_status
-                        )
-                    
-                    self.log_signal.emit(f"[{i+1}/{total_books}] 完成: {real_title} -> {filepath}")
-                    success_count += 1
-                    
-                except Exception as e:
-                    if str(e) == "用户停止下载":
-                        raise e
-                    
-                    if isinstance(e, VerificationError) or "验证码" in str(e):
-                        self.error_signal.emit(f"检测到验证码，批量下载已停止。请手动验证后重试。")
-                        return
-
-                    self.log_signal.emit(f"[{i+1}/{total_books}] 失败: {book.get('title', 'Unknown')} - {str(e)}")
-                    # 继续下一本书
-                
-                # 小延迟
-                time.sleep(1)
-
-            self.finished_signal.emit(f"批量下载完成! 成功: {success_count}/{total_books}\n保存位置: {self.save_dir}")
-
-        except Exception as e:
-            if str(e) == "用户停止下载":
-                self.error_signal.emit("批量下载已停止")
-            else:
-                self.error_signal.emit(f"批量下载出错: {str(e)}")
-
-class BatchOptionsDialog(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("批量下载设置")
-        self.resize(300, 250)
-        self.setup_ui()
-        
-    def setup_ui(self):
-        layout = QVBoxLayout(self)
-        
-        # 前 N 本
-        h1 = QHBoxLayout()
-        h1.addWidget(QLabel("下载当前页前 N 本书:"))
-        self.spin_top_n = QSpinBox()
-        self.spin_top_n.setRange(1, 100)
-        self.spin_top_n.setValue(5)
-        h1.addWidget(self.spin_top_n)
-        layout.addLayout(h1)
-        
-        # 章节限制
-        h2 = QHBoxLayout()
-        h2.addWidget(QLabel("每本限制章节 (0为全部):"))
-        self.spin_chapter_limit = QSpinBox()
-        self.spin_chapter_limit.setRange(0, 5000)
-        self.spin_chapter_limit.setValue(0)
-        h2.addWidget(self.spin_chapter_limit)
-        layout.addLayout(h2)
-
-        # 格式选择
-        h3 = QHBoxLayout()
-        h3.addWidget(QLabel("保存格式:"))
-        self.combo_fmt = QComboBox()
-        self.combo_fmt.addItems(["txt", "epub", "md"])
-        h3.addWidget(self.combo_fmt)
-        layout.addLayout(h3)
-
-        # 分章保存选项
-        h4 = QHBoxLayout()
-        h4.addWidget(QLabel("分章保存:"))
-        self.check_split = QCheckBox("每章一个文件 (仅TXT/MD有效)")
-        h4.addWidget(self.check_split)
-        layout.addLayout(h4)
-        
-        layout.addStretch()
-        
-        # 按钮
-        btn_layout = QHBoxLayout()
-        ok_btn = QPushButton("开始下载")
-        ok_btn.clicked.connect(self.accept)
-        cancel_btn = QPushButton("取消")
-        cancel_btn.clicked.connect(self.reject)
-        btn_layout.addWidget(ok_btn)
-        btn_layout.addWidget(cancel_btn)
-        layout.addLayout(btn_layout)
-        
-    def get_data(self):
-        return self.spin_top_n.value(), self.spin_chapter_limit.value(), self.combo_fmt.currentText(), self.check_split.isChecked()
-
-# 获取书籍信息的工作线程
-class BookInfoWorker(QThread):
-    finished_signal = Signal(dict)
-    error_signal = Signal(str)
-    
-    def __init__(self, downloader, url):
-        super().__init__()
-        self.downloader = downloader
-        self.url = url
-        
-    def run(self):
-        try:
-            info = self.downloader.get_book_info(self.url)
-            self.finished_signal.emit(info)
-        except Exception as e:
-            self.error_signal.emit(str(e))
-
-# 下载工作线程
-class DownloadWorker(QThread):
-    progress_signal = Signal(int, int, str) # 当前, 总数, 标题
-    log_signal = Signal(str)
-    finished_signal = Signal(str) # 文件路径
-    error_signal = Signal(str)
-
-    def __init__(self, downloader, book_url, save_dir, fmt, book_info=None, chapter_indices=None, split_files=False):
-        super().__init__()
-        self.downloader = downloader
-        self.book_url = book_url
-        self.save_dir = save_dir
-        self.fmt = fmt
-        self.book_info = book_info
-        self.chapter_indices = chapter_indices
-        self.split_files = split_files
-        self.is_paused = False
-        self.is_stopped = False
-
-    def pause(self):
-        self.is_paused = True
-        self.log_signal.emit("下载已暂停")
-
-    def resume(self):
-        self.is_paused = False
-        self.log_signal.emit("下载继续")
-
-    def stop(self):
-        self.is_stopped = True
-        self.is_paused = False # 确保我们不会卡在暂停循环中
-        self.log_signal.emit("正在停止下载...")
-
-    def check_control_status(self):
-        if self.is_stopped:
-            raise Exception("用户停止下载")
-        
-        while self.is_paused:
-            time.sleep(0.1)
-            if self.is_stopped:
-                raise Exception("用户停止下载")
-
-    def run(self):
-        try:
-            if not self.book_info:
-                self.log_signal.emit(f"正在获取书籍信息: {self.book_url}")
-                self.book_info = self.downloader.get_book_info(self.book_url)
-            
-            # 重新发送信息以防万一
-            self.log_signal.emit(f"书名: {self.book_info['title']}")
-            self.log_signal.emit(f"作者: {self.book_info['author']}")
-            
-            chapters_to_download_count = len(self.chapter_indices) if self.chapter_indices else len(self.book_info['chapters'])
-            self.log_signal.emit(f"计划下载章节数: {chapters_to_download_count}")
-
-            if not self.book_info['chapters']:
-                self.error_signal.emit("未找到章节，请检查页面是否为书籍目录页。")
-                return
-
-            def callback(current, total, title):
-                self.progress_signal.emit(current, total, title)
-
-            if self.fmt == 'txt':
-                filepath = self.downloader.save_to_txt(
-                    self.book_info, 
-                    self.save_dir, 
-                    callback,
-                    chapter_indices=self.chapter_indices,
-                    split_files=self.split_files,
-                    control_callback=self.check_control_status
-                )
-            elif self.fmt == 'md':
-                filepath = self.downloader.save_to_md(
-                    self.book_info, 
-                    self.save_dir, 
-                    callback,
-                    chapter_indices=self.chapter_indices,
-                    split_files=self.split_files,
-                    control_callback=self.check_control_status
-                )
-            else:
-                filepath = self.downloader.save_to_epub(
-                    self.book_info, 
-                    self.save_dir, 
-                    callback,
-                    chapter_indices=self.chapter_indices,
-                    control_callback=self.check_control_status
-                )
-            
-            self.finished_signal.emit(filepath)
-
-        except Exception as e:
-            self.error_signal.emit(str(e))
-
-class CustomWebEnginePage(QWebEnginePage):
-    """自定义页面以在同一视图中打开链接而不是新标签页"""
-    def createWindow(self, _type):
-        return self
-
-class CustomWebEngineView(QWebEngineView):
-    """使用我们要自定义页面的自定义视图"""
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setPage(CustomWebEnginePage(self))
-
-    def createWindow(self, _type):
-        return self
-
-class ChapterSelectionDialog(QDialog):
-    def __init__(self, total_chapters, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("下载选项")
-        self.resize(400, 300)
-        self.total_chapters = total_chapters
-        
-        self.setup_ui()
-        
-    def setup_ui(self):
-        layout = QVBoxLayout(self)
-        
-        # 章节选择组
-        grp_box = QGroupBox("章节选择")
-        grp_layout = QVBoxLayout(grp_box)
-        
-        self.radio_all = QRadioButton(f"全部章节 (共 {self.total_chapters} 章)")
-        self.radio_all.setChecked(True)
-        grp_layout.addWidget(self.radio_all)
-        
-        # 范围
-        range_layout = QHBoxLayout()
-        self.radio_range = QRadioButton("范围选择:")
-        self.spin_start = QSpinBox()
-        self.spin_start.setRange(1, self.total_chapters)
-        self.spin_start.setValue(1)
-        self.spin_end = QSpinBox()
-        self.spin_end.setRange(1, self.total_chapters)
-        self.spin_end.setValue(self.total_chapters)
-        range_layout.addWidget(self.radio_range)
-        range_layout.addWidget(QLabel("第"))
-        range_layout.addWidget(self.spin_start)
-        range_layout.addWidget(QLabel("章 到 第"))
-        range_layout.addWidget(self.spin_end)
-        range_layout.addWidget(QLabel("章"))
-        grp_layout.addLayout(range_layout)
-        
-        # 列表
-        list_layout = QHBoxLayout()
-        self.radio_list = QRadioButton("自定义列表:")
-        self.edit_list = QLineEdit()
-        self.edit_list.setPlaceholderText("例如: 1,3,5 (逗号分隔)")
-        list_layout.addWidget(self.radio_list)
-        list_layout.addWidget(self.edit_list)
-        grp_layout.addLayout(list_layout)
-        
-        layout.addWidget(grp_box)
-        
-        # 文件保存选项
-        file_box = QGroupBox("文件保存选项")
-        file_layout = QVBoxLayout(file_box)
-        self.check_split = QCheckBox("分章保存 (每章一个文件)")
-        self.check_split.setToolTip("仅TXT/MD格式有效")
-        file_layout.addWidget(self.check_split)
-        layout.addWidget(file_box)
-        
-        # 按钮
-        btn_layout = QHBoxLayout()
-        ok_btn = QPushButton("开始下载")
-        ok_btn.clicked.connect(self.accept)
-        cancel_btn = QPushButton("取消")
-        cancel_btn.clicked.connect(self.reject)
-        btn_layout.addWidget(ok_btn)
-        btn_layout.addWidget(cancel_btn)
-        layout.addLayout(btn_layout)
-
-        # 连接信号以自动选择单选按钮
-        self.spin_start.valueChanged.connect(lambda: self.radio_range.setChecked(True))
-        self.spin_end.valueChanged.connect(lambda: self.radio_range.setChecked(True))
-        self.edit_list.textChanged.connect(lambda: self.radio_list.setChecked(True))
-        
-    def get_data(self):
-        # 返回 (indices, split_files)
-        # indices 是基于0的索引列表，或 None 表示全部
-        split = self.check_split.isChecked()
-        
-        if self.radio_all.isChecked():
-            return None, split
-            
-        indices = []
-        if self.radio_range.isChecked():
-            start = self.spin_start.value() - 1
-            end = self.spin_end.value()
-            if start < 0: start = 0
-            if end > self.total_chapters: end = self.total_chapters
-            indices = list(range(start, end))
-            
-        elif self.radio_list.isChecked():
-            # 逗号分隔的基本解析
-            text = self.edit_list.text()
-            parts = text.replace('，', ',').split(',')
-            for p in parts:
-                try:
-                    idx = int(p.strip()) - 1
-                    if 0 <= idx < self.total_chapters:
-                        indices.append(idx)
-                except:
-                    pass
-            indices = sorted(list(set(indices)))
-            
-        return indices, split
+from downloader import FanqieDownloader
+from workers import BatchDownloadWorker, BookInfoWorker, DownloadWorker
+from ui_components import CustomWebEngineView, CustomWebEnginePage, ChapterSelectionDialog, BatchOptionsDialog
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -824,14 +397,14 @@ class MainWindow(QMainWindow):
         # 显示选择对话框
         dialog = ChapterSelectionDialog(len(book_info['chapters']), self)
         if dialog.exec():
-            indices, split_files = dialog.get_data()
-            self.start_real_download(book_info, indices, split_files)
+            indices, split_files, delay = dialog.get_data()
+            self.start_real_download(book_info, indices, split_files, delay)
         else:
             self.log("用户取消下载")
             self.download_btn.setEnabled(True)
             self.check_download_availability() # 如果需要，恢复批量按钮
 
-    def start_real_download(self, book_info, indices, split_files):
+    def start_real_download(self, book_info, indices, split_files, delay=-1):
         self.log("开始下载任务...")
         
         save_dir = os.path.join(os.getcwd(), "downloads")
@@ -844,7 +417,8 @@ class MainWindow(QMainWindow):
         self.worker = DownloadWorker(self.downloader, url, save_dir, fmt, 
                                    book_info=book_info, 
                                    chapter_indices=indices, 
-                                   split_files=split_files)
+                                   split_files=split_files,
+                                   delay=delay)
         self.worker.progress_signal.connect(self.update_progress)
         self.worker.log_signal.connect(self.log)
         self.worker.finished_signal.connect(self.on_download_finished)
@@ -890,8 +464,8 @@ class MainWindow(QMainWindow):
         # 1. 询问设置
         dialog = BatchOptionsDialog(self)
         if dialog.exec():
-            top_n, chapter_limit, fmt, split_files = dialog.get_data()
-            self.start_batch_download(top_n, chapter_limit, fmt, split_files)
+            top_n, chapter_limit, fmt, split_files, delay = dialog.get_data()
+            self.start_batch_download(top_n, chapter_limit, fmt, split_files, delay)
         else:
             self.log("取消批量下载")
 
@@ -950,14 +524,14 @@ class MainWindow(QMainWindow):
                 
         return level1, level2, level3
 
-    def start_batch_download(self, top_n, chapter_limit, fmt='txt', split_files=False):
+    def start_batch_download(self, top_n, chapter_limit, fmt='txt', split_files=False, delay=-1):
         self.batch_btn.setEnabled(False)
         self.download_btn.setEnabled(False)
         
         url = self.web_view.url().toString()
         title = self.web_view.title()
         
-        self.log(f"准备批量下载: {title} (Top {top_n}, 格式: {fmt}, 分章: {split_files})")
+        self.log(f"准备批量下载: {title} (Top {top_n}, 格式: {fmt}, 分章: {split_files}, 间隔: {'随机' if delay < 0 else str(delay)+'s'})")
         
         # 同步 UA 和 Cookies
         ua = self.web_view.page().profile().httpUserAgent()
@@ -980,7 +554,8 @@ class MainWindow(QMainWindow):
             top_n=top_n,
             chapters_count=chapter_limit,
             fmt=fmt,
-            split_files=split_files
+            split_files=split_files,
+            delay=delay
         )
         self.batch_worker.progress_signal.connect(self.on_batch_progress)
         self.batch_worker.log_signal.connect(self.log)
