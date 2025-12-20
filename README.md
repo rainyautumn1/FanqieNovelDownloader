@@ -1,5 +1,8 @@
 # 番茄小说内容下载器 (Fanqie Novel Downloader)
 
+[![License](https://img.shields.io/github/license/rainyautumn1/FanqieNovelDownloader?style=flat-square)](LICENSE)
+[![Changelog](https://img.shields.io/badge/Changelog-View%20Updates-blue?style=flat-square)](CHANGELOG.md)
+
 ## 简介
 这是一个基于 Python (PySide6) 开发的高级番茄小说内容下载工具。它集成了内置浏览器，支持用户直接浏览番茄小说网，登录 SVIP 账号以获取完整内容，并提供灵活的单本与批量下载功能。
 
