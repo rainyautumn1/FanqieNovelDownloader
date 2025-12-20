@@ -3,7 +3,12 @@ from bs4 import BeautifulSoup
 import time
 import os
 import re
+import random
 from ebooklib import epub
+
+class VerificationError(Exception):
+    """当检测到验证码或风控时抛出"""
+    pass
 
 class FanqieDownloader:
     def __init__(self, cookies=None):
@@ -12,8 +17,8 @@ class FanqieDownloader:
             'Accept-Language': 'en-US,en;q=0.9',
         }
         self.cookies = cookies
-        # Charset from research (Fanqie Novel obfuscation map)
-        # Note: This map might change over time.
+        # 字符集来自研究（番茄小说混淆映射）
+        # 注意：此映射可能会随时间变化。
         self.code_start = 58344
         self.code_end = 58715
         self.charset = [
@@ -54,24 +59,28 @@ class FanqieDownloader:
 
     def get_book_info(self, url):
         """
-        Fetches book info and chapter list.
+        获取书籍信息和章节列表。
         """
         try:
             response = requests.get(url, headers=self.headers, cookies=self.cookies)
             response.raise_for_status()
             soup = BeautifulSoup(response.text, 'lxml')
             
-            # Try to get title
+            # 尝试获取标题
             title_tag = soup.select_one('.info-name h1') or soup.select_one('h1')
             title = title_tag.get_text(strip=True) if title_tag else "Unknown_Book"
             
-            # Try to get author
+            # 尝试获取作者
             author_tag = soup.select_one('.author-name-text')
             author = author_tag.get_text(strip=True) if author_tag else "Unknown_Author"
 
-            # Get chapters
+            # 尝试获取简介
+            intro_tag = soup.select_one('.page-abstract-content')
+            introduction = intro_tag.get_text(strip=True) if intro_tag else "No introduction available."
+
+            # 获取章节
             chapters = []
-            # Selector might vary, trying common ones
+            # 选择器可能会变化，尝试常见的选择器
             chapter_items = soup.select('.chapter-item a') or soup.select('.chapter-list a')
             
             for item in chapter_items:
@@ -88,27 +97,37 @@ class FanqieDownloader:
             return {
                 'title': title,
                 'author': author,
+                'introduction': introduction,
                 'chapters': chapters
             }
         except Exception as e:
-            raise Exception(f"Failed to get book info: {str(e)}")
+            raise Exception(f"获取书籍信息失败: {str(e)}")
 
     def get_chapter_content(self, url):
         """
-        Fetches and decodes content for a single chapter.
+        获取并解码单个章节的内容。
         """
         try:
             response = requests.get(url, headers=self.headers, cookies=self.cookies)
             response.raise_for_status()
             soup = BeautifulSoup(response.text, 'lxml')
             
-            # Content selector
+            # 内容选择器
             content_div = soup.select_one('.muye-reader-content') or soup.select_one('.muye-reader-content-16')
             
             if not content_div:
-                return "Content not found or locked (VIP chapter)."
+                # 检查是否是验证码页面
+                # 1. 检查 title
+                page_title = soup.title.string if soup.title else ""
+                # 2. 检查常见验证码关键字或脚本
+                page_text = response.text
+                if "WAF" in page_title or "验证" in page_title or "captcha" in page_text or "verify" in page_text:
+                    raise VerificationError("检测到验证码或风控页面")
+                
+                # 如果只是 VIP 锁定，通常会有特定的提示，这里简单处理
+                return "未找到内容或内容被锁定（VIP章节）。"
 
-            # Extract paragraphs
+            # 提取段落
             paragraphs = content_div.find_all('p')
             decoded_paragraphs = []
             
@@ -118,13 +137,15 @@ class FanqieDownloader:
                 decoded_paragraphs.append(decoded_text)
             
             return "\n\n".join(decoded_paragraphs)
+        except VerificationError:
+            raise
         except Exception as e:
-            return f"Error fetching chapter: {str(e)}"
+            return f"获取章节出错: {str(e)}"
 
     def get_rank_categories(self):
         """
-        Fetches available categories from the ranking page.
-        Returns a list of dicts: {'name': str, 'url': str}
+        从排行榜页面获取可用的分类。
+        返回字典列表: {'name': str, 'url': str}
         """
         try:
             url = "https://fanqienovel.com/rank"
@@ -135,27 +156,27 @@ class FanqieDownloader:
             categories = []
             seen = set()
             
-            # Find all links starting with /rank/
-            # This is a heuristic, might include some nav links, but usually these are the categories
+            # 查找所有以 /rank/ 开头的链接
+            # 这是一种启发式方法，可能会包含一些导航链接，但通常这些是分类
             for link in soup.find_all('a'):
                 href = link.get('href')
                 text = link.get_text(strip=True)
                 if href and href.startswith('/rank/') and text:
-                    # Filter out some common non-category links if any (e.g. 'More')
-                    if text not in seen and len(text) < 10: # Category names are usually short
+                    # 过滤掉一些常见的非分类链接（如果有）（例如 'More'）
+                    if text not in seen and len(text) < 10: # 分类名称通常较短
                         full_url = 'https://fanqienovel.com' + href
                         categories.append({'name': text, 'url': full_url})
                         seen.add(text)
             
             return categories
         except Exception as e:
-            raise Exception(f"Failed to get rank categories: {str(e)}")
+            raise Exception(f"获取排行榜分类失败: {str(e)}")
 
     def get_rank_books(self, category_url):
         """
-        Fetches books from a category ranking page.
-        Returns a list of dicts: {'title': str, 'url': str}
-        Note: The titles here might be obfuscated, so use get_book_info to get clean title.
+        从分类排行榜页面获取书籍。
+        返回字典列表: {'title': str, 'url': str}
+        注意：这里的标题可能会被混淆，所以使用 get_book_info 获取干净的标题。
         """
         try:
             response = requests.get(category_url, headers=self.headers, cookies=self.cookies)
@@ -163,25 +184,25 @@ class FanqieDownloader:
             soup = BeautifulSoup(response.text, 'lxml')
             
             books = []
-            # Books are usually links to /page/
-            # Look for links containing /page/
+            # 书籍通常链接到 /page/
+            # 寻找包含 /page/ 的链接
             
-            # Using a set to avoid duplicates (image link + title link)
+            # 使用集合避免重复（图片链接 + 标题链接）
             seen_urls = set()
             
-            # Finding book items more precisely if possible
-            # Common structure: .rank-book-list .book-item a
+            # 如果可能，更精确地查找书籍项目
+            # 常见结构: .rank-book-list .book-item a
             
-            # Let's search for all 'a' tags with href containing '/page/'
+            # 让我们搜索所有 href 包含 '/page/' 的 'a' 标签
             for link in soup.find_all('a'):
                 href = link.get('href')
                 if href and '/page/' in href:
                     full_url = 'https://fanqienovel.com' + href if not href.startswith('http') else href
                     if full_url not in seen_urls:
-                        # Extract title if possible
+                        # 如果可能，提取标题
                         title = link.get_text(strip=True)
                         if not title:
-                            # Try finding title in children or alt attribute
+                            # 尝试在子元素或 alt 属性中查找标题
                             img = link.find('img')
                             if img and img.get('alt'):
                                 title = img.get('alt')
@@ -193,13 +214,14 @@ class FanqieDownloader:
             
             return books
         except Exception as e:
-            raise Exception(f"Failed to get rank books: {str(e)}")
+            raise Exception(f"获取排行榜书籍失败: {str(e)}")
 
-    def save_to_txt(self, book_data, save_dir, progress_callback=None, chapter_indices=None, split_files=False):
+    def save_to_txt(self, book_data, save_dir, progress_callback=None, chapter_indices=None, split_files=False, control_callback=None):
         """
-        Saves book to TXT.
-        chapter_indices: List of indices of chapters to download (0-based). If None, download all.
-        split_files: If True, save each chapter as a separate file.
+        保存书籍为 TXT 格式。
+        chapter_indices: 要下载的章节索引列表（从0开始）。如果为 None，则下载所有章节。
+        split_files: 如果为 True，则将每一章保存为一个单独的文件。
+        control_callback: 在下载每一章之前调用的函数，用于检查暂停/停止状态。
         """
         chapters_to_download = []
         if chapter_indices:
@@ -212,20 +234,31 @@ class FanqieDownloader:
         total_chapters = len(chapters_to_download)
         
         if split_files:
-            # Create a folder for the book
+            # 为书籍创建一个文件夹
             book_folder = os.path.join(save_dir, book_data['title'])
             if not os.path.exists(book_folder):
                 os.makedirs(book_folder)
             
+            # 保存简介
+            intro_filepath = os.path.join(book_folder, "000_简介.txt")
+            with open(intro_filepath, 'w', encoding='utf-8') as f:
+                f.write(f"Title: {book_data['title']}\n")
+                f.write(f"Author: {book_data['author']}\n")
+                f.write("="*20 + "\n\n")
+                f.write(f"{book_data.get('introduction', '')}\n")
+
             saved_paths = []
             
             for i, chapter in enumerate(chapters_to_download):
+                if control_callback:
+                    control_callback()
+
                 if progress_callback:
                     progress_callback(i + 1, total_chapters, chapter['title'])
                 
                 content = self.get_chapter_content(chapter['url'])
                 
-                # Sanitize filename
+                # 清理文件名
                 safe_title = re.sub(r'[\\/*?:"<>|]', "", chapter['title'])
                 filename = f"{i+1:03d}_{safe_title}.txt"
                 filepath = os.path.join(book_folder, filename)
@@ -234,12 +267,12 @@ class FanqieDownloader:
                     f.write(content)
                 
                 saved_paths.append(filepath)
-                time.sleep(0.5)
+                time.sleep(random.triangular(0.5, 1.0, 0.5))
                 
-            return book_folder # Return directory path
+            return book_folder # 返回目录路径
             
         else:
-            # Single file
+            # 单个文件
             filename = f"{book_data['title']}.txt"
             filepath = os.path.join(save_dir, filename)
             
@@ -247,21 +280,26 @@ class FanqieDownloader:
                 f.write(f"Title: {book_data['title']}\n")
                 f.write(f"Author: {book_data['author']}\n")
                 f.write("="*20 + "\n\n")
+                f.write(f"简介:\n{book_data.get('introduction', '')}\n")
+                f.write("="*20 + "\n\n")
                 
                 for i, chapter in enumerate(chapters_to_download):
+                    if control_callback:
+                        control_callback()
+
                     if progress_callback:
                         progress_callback(i + 1, total_chapters, chapter['title'])
                     
                     content = self.get_chapter_content(chapter['url'])
                     f.write(f"\n\n=== {chapter['title']} ===\n\n")
                     f.write(content)
-                    time.sleep(0.5)
+                    time.sleep(random.triangular(0.5, 1.0, 0.5))
 
             return filepath
 
-    def save_to_md(self, book_data, save_dir, progress_callback=None, chapter_indices=None, split_files=False):
+    def save_to_md(self, book_data, save_dir, progress_callback=None, chapter_indices=None, split_files=False, control_callback=None):
         """
-        Saves book to MD (Markdown).
+        保存书籍为 MD (Markdown) 格式。
         """
         chapters_to_download = []
         if chapter_indices:
@@ -274,18 +312,29 @@ class FanqieDownloader:
         total_chapters = len(chapters_to_download)
         
         if split_files:
-            # Create a folder for the book
+            # 为书籍创建一个文件夹
             book_folder = os.path.join(save_dir, book_data['title'])
             if not os.path.exists(book_folder):
                 os.makedirs(book_folder)
             
+            # 保存简介
+            intro_filepath = os.path.join(book_folder, "000_简介.md")
+            with open(intro_filepath, 'w', encoding='utf-8') as f:
+                f.write(f"# {book_data['title']}\n")
+                f.write(f"**Author:** {book_data['author']}\n\n")
+                f.write("## 简介\n\n")
+                f.write(f"{book_data.get('introduction', '')}\n")
+
             for i, chapter in enumerate(chapters_to_download):
+                if control_callback:
+                    control_callback()
+
                 if progress_callback:
                     progress_callback(i + 1, total_chapters, chapter['title'])
                 
                 content = self.get_chapter_content(chapter['url'])
                 
-                # Sanitize filename
+                # 清理文件名
                 safe_title = re.sub(r'[\\/*?:"<>|]', "", chapter['title'])
                 filename = f"{i+1:03d}_{safe_title}.md"
                 filepath = os.path.join(book_folder, filename)
@@ -294,21 +343,26 @@ class FanqieDownloader:
                     f.write(f"# {chapter['title']}\n\n")
                     f.write(content)
                 
-                time.sleep(0.5)
+                time.sleep(random.triangular(0.5, 1.0, 0.5))
                 
             return book_folder
             
         else:
-            # Single file
+            # 单个文件
             filename = f"{book_data['title']}.md"
             filepath = os.path.join(save_dir, filename)
             
             with open(filepath, 'w', encoding='utf-8') as f:
                 f.write(f"# {book_data['title']}\n")
                 f.write(f"**Author:** {book_data['author']}\n\n")
+                f.write("## 简介\n\n")
+                f.write(f"{book_data.get('introduction', '')}\n\n")
                 f.write("---\n\n")
                 
                 for i, chapter in enumerate(chapters_to_download):
+                    if control_callback:
+                        control_callback()
+
                     if progress_callback:
                         progress_callback(i + 1, total_chapters, chapter['title'])
                     
@@ -316,13 +370,13 @@ class FanqieDownloader:
                     f.write(f"## {chapter['title']}\n\n")
                     f.write(content)
                     f.write("\n\n")
-                    time.sleep(0.5)
+                    time.sleep(random.triangular(0.5, 1.0, 0.5))
 
             return filepath
 
-    def save_to_epub(self, book_data, save_dir, progress_callback=None, chapter_indices=None):
-        # EPUB doesn't support split files in the same way (it's already a zip), 
-        # but we can support partial download.
+    def save_to_epub(self, book_data, save_dir, progress_callback=None, chapter_indices=None, control_callback=None):
+        # EPUB 不支持以相同方式分割文件（它本身就是一个 zip），
+        # 但我们可以支持部分下载。
         
         chapters_to_download = []
         if chapter_indices:
@@ -337,17 +391,31 @@ class FanqieDownloader:
         book.set_title(book_data['title'])
         book.set_language('zh')
         book.add_author(book_data['author'])
+        
+        # 将简介添加到描述元数据中
+        book.add_metadata('DC', 'description', book_data.get('introduction', ''))
 
         spine = []
         toc = []
 
+        # 添加简介章节
+        intro_content = book_data.get('introduction', '').replace('\n', '<br/>')
+        c_intro = epub.EpubHtml(title='简介', file_name='intro.xhtml', lang='zh')
+        c_intro.content = f'<h1>简介</h1><p>{intro_content}</p>'
+        book.add_item(c_intro)
+        spine.append(c_intro)
+        toc.append(c_intro)
+
         total_chapters = len(chapters_to_download)
         for i, chapter in enumerate(chapters_to_download):
+            if control_callback:
+                control_callback()
+
             if progress_callback:
                 progress_callback(i + 1, total_chapters, chapter['title'])
 
             content = self.get_chapter_content(chapter['url'])
-            # Convert newlines to HTML paragraphs
+            # 将换行符转换为 HTML 段落
             html_content = "".join([f"<p>{line}</p>" for line in content.split('\n\n')])
             
             c = epub.EpubHtml(title=chapter['title'], file_name=f'chap_{i+1}.xhtml', lang='zh')
@@ -355,7 +423,7 @@ class FanqieDownloader:
             book.add_item(c)
             spine.append(c)
             toc.append(c)
-            time.sleep(0.5) # Be polite
+            time.sleep(random.triangular(0.5, 1.0, 0.5)) # 礼貌等待
 
         book.toc = toc
         book.add_item(epub.EpubNcx())
