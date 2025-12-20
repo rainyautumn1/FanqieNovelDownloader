@@ -94,6 +94,20 @@ class DownloadManager(QObject):
         if task:
             task.progress = (current, total)
             task.status_msg = msg
+            
+            # 尝试从 msg 中提取标题（如果 worker 传递了 title 作为 msg，或者 msg 格式包含标题）
+            # 但更好的方式是修改 signal 签名。不过为了兼容性，我们可以检查 msg 是否是 "书名: XXX" 格式
+            # 或者，我们在 DownloadWorker 中已经有了 book_info，可以更新 task.title
+            
+            # 如果 worker 是 DownloadWorker，且有了 book_info，则更新 task.title
+            if isinstance(task.worker, DownloadWorker) and task.worker.book_info:
+                real_title = task.worker.book_info.get('title')
+                if real_title and real_title != task.title:
+                    task.title = real_title
+                    # 我们需要一个新的信号来通知 UI 更新标题，或者复用 task_updated
+                    # 这里我们复用 task_updated，但 UI 需要能处理 title 变化
+                    # 也可以在 msg 中带上 title，但 msg 是给用户看的
+            
             self.task_updated.emit(task_id, current, total, msg)
             
     def _on_worker_finished(self, task_id, filepath):
@@ -193,3 +207,10 @@ class DownloadManager(QObject):
         for t in list(self.tasks):
             if t.status not in ['finished']:
                 self.cancel_task(t.id)
+
+    def update_task_title(self, task_id, new_title):
+        task = self.get_task(task_id)
+        if task:
+            task.title = new_title
+            # 触发更新信号，利用已有的机制刷新UI
+            self.task_updated.emit(task_id, task.progress[0], task.progress[1], task.status_msg)

@@ -65,6 +65,29 @@ class BatchDownloadWorker(QThread):
             if not os.path.exists(self.save_dir):
                 os.makedirs(self.save_dir)
 
+            # 预先获取所有书籍信息以更新标题
+            self.log_signal.emit("正在预获取书籍信息以更新标题...")
+            for i, book in enumerate(target_books):
+                self.check_control_status()
+                try:
+                    # 快速获取信息，不获取章节内容，仅为了标题
+                    # 注意：get_book_info 会获取章节列表，速度可能稍慢，但为了准确标题是必要的
+                    self.progress_signal.emit(i, total_books, f"正在获取书籍信息 [{i+1}/{total_books}]")
+                    book_info = self.downloader.get_book_info(book['url'])
+                    # 更新书籍列表中的标题
+                    target_books[i]['title'] = book_info['title']
+                    target_books[i]['author'] = book_info['author']
+                    target_books[i]['book_info'] = book_info # 缓存起来后续使用
+                    
+                    # 立即发送更新信号给UI
+                    self.progress_signal.emit(i, total_books, f"已获取: {book_info['title']}")
+                    
+                    # 防止请求过快
+                    time.sleep(0.5)
+                except Exception as e:
+                    self.log_signal.emit(f"获取书籍信息失败: {book.get('url')} - {str(e)}")
+                    # 失败不影响继续，只是标题可能不准
+
             success_count = 0
 
             for i, book in enumerate(target_books):
@@ -72,11 +95,13 @@ class BatchDownloadWorker(QThread):
                 self.check_control_status()
 
                 try:
-                    self.log_signal.emit(f"[{i+1}/{total_books}] 正在获取书籍信息: {book['url']}")
-                    self.progress_signal.emit(i, total_books, f"正在获取信息: {book.get('title', 'Unknown')}")
+                    # 使用缓存的 info 或者重新获取（如果之前失败了）
+                    if 'book_info' in book:
+                        book_info = book['book_info']
+                    else:
+                        self.log_signal.emit(f"[{i+1}/{total_books}] 正在获取书籍信息: {book['url']}")
+                        book_info = self.downloader.get_book_info(book['url'])
                     
-                    # 获取书籍信息 (获取真实标题)
-                    book_info = self.downloader.get_book_info(book['url'])
                     real_title = book_info['title']
                     
                     self.log_signal.emit(f"[{i+1}/{total_books}] 开始下载: {real_title}")
@@ -156,14 +181,18 @@ class RankParserWorker(QThread):
     finished_signal = Signal(list)
     error_signal = Signal(str)
 
-    def __init__(self, downloader, rank_url):
+    def __init__(self, downloader, rank_url, html_content=None):
         super().__init__()
         self.downloader = downloader
         self.rank_url = rank_url
+        self.html_content = html_content
 
     def run(self):
         try:
-            books = self.downloader.get_rank_books(self.rank_url)
+            if self.html_content:
+                books = self.downloader.parse_rank_books(self.html_content)
+            else:
+                books = self.downloader.get_rank_books(self.rank_url)
             self.finished_signal.emit(books)
         except Exception as e:
             self.error_signal.emit(str(e))
@@ -288,3 +317,26 @@ class DownloadWorker(QThread):
 
         except Exception as e:
             self.error_signal.emit(str(e))
+
+# 标题修正工作线程
+class TitleCorrectionWorker(QThread):
+    title_updated = Signal(str, str) # task_id, new_title
+
+    def __init__(self, downloader, tasks):
+        """
+        tasks: list of (task_id, book_url)
+        """
+        super().__init__()
+        self.downloader = downloader
+        self.tasks = tasks
+
+    def run(self):
+        for task_id, book_url in self.tasks:
+            try:
+                # 仅获取 info，不下载
+                book_info = self.downloader.get_book_info(book_url)
+                if book_info and book_info.get('title'):
+                    self.title_updated.emit(task_id, book_info['title'])
+                time.sleep(0.5) # 避免请求过快
+            except:
+                pass # 失败忽略，保持原样

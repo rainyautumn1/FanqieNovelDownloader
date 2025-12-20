@@ -11,7 +11,7 @@ import json
 import logging
 from logging_config import setup_logging
 from downloader import FanqieDownloader
-from workers import BatchDownloadWorker, BookInfoWorker, DownloadWorker, RankParserWorker
+from workers import BatchDownloadWorker, BookInfoWorker, DownloadWorker, RankParserWorker, TitleCorrectionWorker
 from ui_components import CustomWebEngineView, CustomWebEnginePage, ChapterSelectionDialog, BatchOptionsDialog
 from download_manager import DownloadManager
 from download_ui import DownloadManagerWindow
@@ -63,10 +63,18 @@ class MainWindow(QMainWindow):
         
         # Manager -> UI
         self.download_manager.task_added.connect(self.on_task_added)
-        self.download_manager.task_updated.connect(self.download_window.update_downloading_item)
+        self.download_manager.task_updated.connect(self.on_task_updated)
         self.download_manager.task_status_changed.connect(self.download_window.update_downloading_item_status)
         self.download_manager.task_finished.connect(self.on_task_finished)
         self.download_manager.task_removed.connect(self.download_window.remove_downloading_item)
+
+    def on_task_updated(self, task_id, current, total, msg):
+        # 获取任务对象以检查是否有标题更新
+        task = self.download_manager.get_task(task_id)
+        title = task.title if task else None
+        
+        # 在UI更新时传递标题
+        self.download_window.update_downloading_item(task_id, current, total, msg, title)
 
     def on_task_added(self, task_id, title):
         widget = self.download_window.add_downloading_item(task_id, title)
@@ -562,8 +570,11 @@ class MainWindow(QMainWindow):
             'delay': delay
         }
 
+        self.web_view.page().toHtml(self.on_batch_html_ready)
+
+    def on_batch_html_ready(self, html):
         url = self.web_view.url().toString()
-        self.rank_worker = RankParserWorker(self.downloader, url)
+        self.rank_worker = RankParserWorker(self.downloader, url, html_content=html)
         self.rank_worker.finished_signal.connect(self.on_rank_parsed)
         self.rank_worker.error_signal.connect(self.on_batch_error_reset)
         self.rank_worker.start()
@@ -602,8 +613,10 @@ class MainWindow(QMainWindow):
         if not os.path.exists(final_save_path):
             os.makedirs(final_save_path)
             
+        added_tasks = [] # List of (task_id, book_url)
+        
         for book in target_books:
-            self.download_manager.add_single_task(
+            task_id = self.download_manager.add_single_task(
                 book_url=book['url'],
                 save_dir=final_save_path,
                 fmt=fmt,
@@ -614,6 +627,14 @@ class MainWindow(QMainWindow):
                 chapter_limit=chapter_limit,
                 title=book.get('title')
             )
+            added_tasks.append((task_id, book['url']))
+            
+        # 启动标题修正 Worker
+        if added_tasks:
+            # 保持引用防止被垃圾回收
+            self.title_correction_worker = TitleCorrectionWorker(self.downloader, added_tasks)
+            self.title_correction_worker.title_updated.connect(self.download_manager.update_task_title)
+            self.title_correction_worker.start()
             
         QMessageBox.information(self, "已添加", f"已将 {len(target_books)} 本书加入下载队列。")
         self.download_window.show()

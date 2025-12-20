@@ -322,12 +322,14 @@ class DownloadManagerWindow(QWidget):
                 self.update_counts()
                 return
 
-    def update_downloading_item(self, task_id, current, total, status_text):
+    def update_downloading_item(self, task_id, current, total, status_text, title=None):
         for i in range(self.list_downloading.count()):
             item = self.list_downloading.item(i)
             widget = self.list_downloading.itemWidget(item)
             if widget.task_id == task_id:
                 widget.update_progress(current, total, status_text)
+                if title:
+                    widget.title_label.setText(title)
                 return
 
     def update_downloading_item_status(self, task_id, status):

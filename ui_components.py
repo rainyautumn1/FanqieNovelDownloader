@@ -73,6 +73,12 @@ class BatchOptionsDialog(QDialog):
         self.lbl_delay_tip.setStyleSheet("color: red; font-size: 10px;")
         layout.addWidget(self.lbl_delay_tip)
 
+        # 提示用户滑动页面
+        self.lbl_scroll_tip = QLabel("⚠️ 注意：批量下载前请先在页面中向下滚动，确保要下载的书籍已加载出来。")
+        self.lbl_scroll_tip.setStyleSheet("color: #E6A23C; font-weight: bold; margin-top: 10px;")
+        self.lbl_scroll_tip.setWordWrap(True)
+        layout.addWidget(self.lbl_scroll_tip)
+
         # 分章保存选项
         h4 = QHBoxLayout()
         h4.addWidget(QLabel("分章保存:"))

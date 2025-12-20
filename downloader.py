@@ -375,35 +375,19 @@ class FanqieDownloader:
         except Exception as e:
             raise Exception(f"获取排行榜分类失败: {str(e)}")
 
-    def get_rank_books(self, category_url):
+    def parse_rank_books(self, html_content, base_url="https://fanqienovel.com"):
         """
-        从分类排行榜页面获取书籍。
-        返回字典列表: {'title': str, 'url': str}
-        注意：这里的标题可能会被混淆，所以使用 get_book_info 获取干净的标题。
+        解析排行榜 HTML 内容获取书籍列表。
         """
         try:
-            response = requests.get(category_url, headers=self.headers, cookies=self.cookies)
-            response.encoding = 'utf-8' # 强制使用 UTF-8，防止中文乱码
-            response.raise_for_status()
-            soup = BeautifulSoup(response.text, 'lxml')
-            
+            soup = BeautifulSoup(html_content, 'lxml')
             books = []
-            # 书籍通常链接到 /page/
-            # 寻找包含 /page/ 的链接
-            
-            # 使用集合避免重复（图片链接 + 标题链接）
-            
-            # 如果可能，更精确地查找书籍项目
-            # 常见结构: .rank-book-list .book-item a
-            
-            # 让我们搜索所有 href 包含 '/page/' 的 'a' 标签
-            # 使用字典来跟踪已添加的书籍，以便在找到更好的标题（如图片alt）时更新
             seen_books = {} # url -> {'index': int, 'from_img': bool}
 
             for link in soup.find_all('a'):
                 href = link.get('href')
                 if href and '/page/' in href:
-                    full_url = 'https://fanqienovel.com' + href if not href.startswith('http') else href
+                    full_url = base_url + href if not href.startswith('http') else href
                     
                     title = ""
                     from_img = False
@@ -414,6 +398,15 @@ class FanqieDownloader:
                         title = img.get('alt')
                         from_img = True
                     
+                    # 尝试查找其他可能的标题来源
+                    if not title:
+                        # 尝试找内部的 h4 或其他标题标签
+                        for tag in ['h1', 'h2', 'h3', 'h4', 'div', 'span']:
+                            found_tag = link.find(tag, class_=lambda x: x and ('name' in x or 'title' in x))
+                            if found_tag:
+                                title = found_tag.get_text(strip=True)
+                                break
+
                     # 2. 其次尝试直接获取文本
                     if not title:
                         title = link.get_text(strip=True)
@@ -422,6 +415,8 @@ class FanqieDownloader:
                         title = "Unknown Title"
 
                     # 3. 尝试解码标题（处理混淆字符）
+                    # 只有当 title 看起来被混淆（包含特定范围的字符）或者我们确定它是从文本中提取的才尝试解码
+                    # 但 decode_text 是安全的，如果字符不在范围内会返回原字符
                     title = self.decode_text(title)
 
                     # 4. 简单的标题清理
@@ -440,6 +435,20 @@ class FanqieDownloader:
                         seen_books[full_url] = {'index': len(books)-1, 'from_img': from_img}
             
             return books
+        except Exception as e:
+            raise Exception(f"解析书籍列表失败: {str(e)}")
+
+    def get_rank_books(self, category_url):
+        """
+        从分类排行榜页面获取书籍。
+        返回字典列表: {'title': str, 'url': str}
+        注意：这里的标题可能会被混淆，所以使用 get_book_info 获取干净的标题。
+        """
+        try:
+            response = requests.get(category_url, headers=self.headers, cookies=self.cookies)
+            response.encoding = 'utf-8' # 强制使用 UTF-8，防止中文乱码
+            response.raise_for_status()
+            return self.parse_rank_books(response.text)
         except Exception as e:
             raise Exception(f"获取排行榜书籍失败: {str(e)}")
 
