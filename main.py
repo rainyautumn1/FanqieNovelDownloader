@@ -17,12 +17,19 @@ from workers import BatchDownloadWorker, BookInfoWorker, DownloadWorker, RankPar
 from ui_components import CustomWebEngineView, CustomWebEnginePage, ChapterSelectionDialog, BatchOptionsDialog
 from download_manager import DownloadManager
 from download_ui import DownloadManagerWindow
+from update_manager import check_update
+from version import VERSION
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("番茄小说内置浏览器下载器 (SVIP支持)")
+        self.setWindowTitle(f"番茄小说内置浏览器下载器 (SVIP支持) v{VERSION}")
         self.resize(1200, 800)
+
+        # 启动时检查更新
+        # 使用 QTimer.singleShot 在主循环启动后执行，避免阻塞启动或 UI 未就绪
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(1000, lambda: self.check_for_updates())
 
         self.downloader = FanqieDownloader()
         
@@ -55,6 +62,18 @@ class MainWindow(QMainWindow):
         
         # 初始加载
         self.web_view.setUrl(QUrl("https://fanqienovel.com/"))
+
+    def check_for_updates(self):
+        """调用 update_manager 检查更新"""
+        try:
+            # check_update 返回 False 表示正在进行更新（需要关闭当前窗口），返回 True 表示无需更新或取消
+            should_continue = check_update(self)
+            if not should_continue:
+                # 如果 check_update 内部触发了更新流程，理论上它会处理重启
+                # 但这里我们确保主窗口关闭
+                self.close()
+        except Exception as e:
+            self.log(f"自动更新检查出错: {e}")
 
     def setup_manager_connections(self):
         # UI -> Manager
