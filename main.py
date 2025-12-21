@@ -26,6 +26,12 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"番茄小说内置浏览器下载器 (SVIP支持) v{VERSION}")
         self.resize(1200, 800)
 
+        # 设置窗口图标
+        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'app.ico')
+        if os.path.exists(icon_path):
+            from PySide6.QtGui import QIcon
+            QApplication.instance().setWindowIcon(QIcon(icon_path))
+
         # 启动时检查更新
         # 使用 QTimer.singleShot 在主循环启动后执行，避免阻塞启动或 UI 未就绪
         from PySide6.QtCore import QTimer
@@ -63,11 +69,11 @@ class MainWindow(QMainWindow):
         # 初始加载
         self.web_view.setUrl(QUrl("https://fanqienovel.com/"))
 
-    def check_for_updates(self):
+    def check_for_updates(self, force=False):
         """调用 update_manager 检查更新"""
         try:
             # check_update 返回 False 表示正在进行更新（需要关闭当前窗口），返回 True 表示无需更新或取消
-            should_continue = check_update(self)
+            should_continue = check_update(self, force=force)
             if not should_continue:
                 # 如果 check_update 内部触发了更新流程，理论上它会处理重启
                 # 但这里我们确保主窗口关闭
@@ -284,6 +290,18 @@ class MainWindow(QMainWindow):
         self.manager_btn.setStyleSheet("background-color: #607D8B; color: white; font-weight: bold;")
         self.manager_btn.clicked.connect(lambda: self.download_window.show())
         control_layout.addWidget(self.manager_btn)
+
+        # Bilibili 链接按钮
+        self.bili_btn = QPushButton("B站主页")
+        self.bili_btn.setStyleSheet("background-color: #FB7299; color: white; font-weight: bold;")
+        self.bili_btn.clicked.connect(lambda: self.open_bilibili_link())
+        control_layout.addWidget(self.bili_btn)
+
+        # 检查更新按钮
+        self.update_btn = QPushButton("检查更新")
+        self.update_btn.setStyleSheet("font-weight: bold;")
+        self.update_btn.clicked.connect(lambda: self.check_for_updates(force=True))
+        control_layout.addWidget(self.update_btn)
 
         main_layout.addWidget(control_group)
 
@@ -698,11 +716,24 @@ class MainWindow(QMainWindow):
         self.log(f"解析榜单失败: {err}")
         QMessageBox.warning(self, "错误", f"解析榜单失败: {err}")
 
+    def open_bilibili_link(self):
+        from PySide6.QtGui import QDesktopServices
+        url = QUrl("https://space.bilibili.com/16111026?spm_id_from=333.1365.0.0")
+        QDesktopServices.openUrl(url)
+
 if __name__ == "__main__":
     if hasattr(Qt, 'AA_EnableHighDpiScaling'):
         QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     if hasattr(Qt, 'AA_UseHighDpiPixmaps'):
         QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+
+    # 设置 AppUserModelID 以便任务栏图标正确显示
+    try:
+        from ctypes import windll
+        myappid = f'rainyautumn.fanqienoveldownloader.gui.{VERSION}'
+        windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+    except ImportError:
+        pass
 
     app = QApplication(sys.argv)
     window = MainWindow()

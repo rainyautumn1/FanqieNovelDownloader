@@ -140,6 +140,15 @@ class UpdateDialog(QDialog):
         # 给它加个背景色强调一下，类似用户截图中的区域
         self.disclaimer_label.setStyleSheet("QLabel { background-color: #f9f9f9; padding: 10px; border: 1px solid #e0e0e0; border-radius: 4px; }")
         self.layout.addWidget(self.disclaimer_label)
+
+        # 增加 Bilibili 链接
+        bilibili_link = (
+            "<p>关注作者B站: <a href='https://space.bilibili.com/16111026?spm_id_from=333.1365.0.0'>落雨清秋真是太帅了</a></p>"
+        )
+        self.bili_label = QLabel(bilibili_link)
+        self.bili_label.setOpenExternalLinks(True)
+        self.bili_label.setStyleSheet("QLabel { color: #FB7299; font-weight: bold; margin-top: 5px; }")
+        self.layout.addWidget(self.bili_label)
         
         # 状态标签
         self.status_label = QLabel("正在检查更新...")
@@ -226,13 +235,16 @@ class UpdateDialog(QDialog):
         # 如果 do_update 返回，说明可能失败了，或者需要关闭当前程序
         self.accept() # 关闭对话框
 
-def check_update(parent=None):
+def check_update(parent=None, force=False):
     """
     检查更新入口
+    Args:
+        parent: 父窗口
+        force: 是否强制检查 (忽略今日跳过设置)
     Returns: 
         bool: True 表示主程序应继续运行，False 表示应停止（正在更新或已重启）
     """
-    if not UpdateConfig.should_check_update():
+    if not force and not UpdateConfig.should_check_update():
         print("今日已跳过检查更新")
         return True
 
@@ -261,7 +273,67 @@ def do_update(remote_ver, parent=None):
     progress.setValue(10)
     QApplication.processEvents()
 
-    # 1. 优先尝试 Git Pull
+    # 检查是否为打包后的 EXE 环境
+    if getattr(sys, 'frozen', False):
+        progress.setLabelText("正在下载最新安装包...")
+        QApplication.processEvents()
+        
+        exe_url = f"https://github.com/{GITHUB_REPO}/releases/download/v{remote_ver}/FanqieDownloader_Setup.exe"
+        exe_filename = f"FanqieDownloader_Setup_v{remote_ver}.exe"
+        exe_path = os.path.join(os.path.dirname(sys.executable), exe_filename)
+        
+        download_success = False
+        
+        # 尝试下载 EXE
+        for mirror in MIRRORS:
+            try:
+                # GitHub Release 的文件也需要通过镜像下载
+                # 注意：很多镜像站对 release 的支持格式可能不同，这里尝试通用格式
+                # 常见格式: https://mirror/https://github.com/...
+                url = f"{mirror}{exe_url}"
+                print(f"尝试下载安装包: {url}")
+                
+                resp = requests.get(url, stream=True, timeout=30)
+                if resp.status_code == 200:
+                    total_size = int(resp.headers.get('content-length', 0))
+                    downloaded = 0
+                    with open(exe_path, 'wb') as f:
+                        for chunk in resp.iter_content(chunk_size=8192):
+                            if chunk:
+                                f.write(chunk)
+                                downloaded += len(chunk)
+                                # 更新进度条 (20-90)
+                                if total_size > 0:
+                                    p = 20 + int((downloaded / total_size) * 70)
+                                    progress.setValue(p)
+                                    QApplication.processEvents()
+                    download_success = True
+                    break
+            except Exception as e:
+                print(f"下载失败: {e}")
+        
+        if not download_success:
+            QMessageBox.warning(parent, "更新失败", f"无法下载安装包。\n请手动访问 GitHub 下载最新版 v{remote_ver}。")
+            return
+
+        progress.setValue(100)
+        progress.setLabelText("下载完成，正在启动安装程序...")
+        
+        reply = QMessageBox.question(parent, "下载完成", 
+                                     f"安装包已下载到:\n{exe_path}\n\n是否立即运行安装程序？\n(注意：安装时请先关闭本软件)",
+                                     QMessageBox.Yes | QMessageBox.No)
+        
+        if reply == QMessageBox.Yes:
+            try:
+                # 启动安装程序
+                os.startfile(exe_path)
+                # 退出当前程序
+                sys.exit(0)
+            except Exception as e:
+                QMessageBox.critical(parent, "错误", f"无法启动安装程序: {e}")
+        return
+
+    # 1. 优先尝试 Git Pull (开发环境)
     if os.path.exists(".git"):
         progress.setLabelText("正在通过 Git 拉取更新...")
         QApplication.processEvents()

@@ -1,18 +1,46 @@
+# Python compilation
 __pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / Packaging
 dist/
 build/
 *.spec
+Output/
+*.iss
+*.isl
+*.exe
+*.zip
+*.msi
+*.ico
+
+# User data & Config
 cookies.json
+update_config.json
 browser_data/
 downloads/
+temp_extract/
+update_temp.zip
+
+# IDEs and Editors
 .DS_Store
 .idea/
 .vscode/
+*.swp
+*.swo
+
+# Virtual Environments
 venv/
 env/
-*.pyc
+.env
 
 # Logs
 logs/
 test_logs/
 *.log
+
+# Test & Temp
+test_output_xlsx/
+temp/
+tmp/
