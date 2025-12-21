@@ -3,3 +3,4 @@ beautifulsoup4
 lxml
 ebooklib
 PySide6
+openpyxl

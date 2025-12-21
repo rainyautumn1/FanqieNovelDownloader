@@ -1,5 +1,7 @@
 import sys
 import os
+import openpyxl
+import traceback
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QLineEdit, QPushButton, QProgressBar, 
                              QTextEdit, QLabel, QMessageBox, QComboBox)
@@ -612,6 +614,39 @@ class MainWindow(QMainWindow):
         
         if not os.path.exists(final_save_path):
             os.makedirs(final_save_path)
+
+        # --- 保存书籍元数据到 XLSX ---
+        try:
+            xlsx_filename = f"{l3}运营数据.xlsx"
+            xlsx_path = os.path.join(final_save_path, xlsx_filename)
+            
+            # 检查文件是否存在
+            file_exists = os.path.exists(xlsx_path)
+            
+            if file_exists:
+                wb = openpyxl.load_workbook(xlsx_path)
+                ws = wb.active
+            else:
+                wb = openpyxl.Workbook()
+                ws = wb.active
+                # 写入表头
+                ws.append(['书名', 'URL', '状态', '在读人数', '最新章节', '更新时间'])
+            
+            for book in target_books:
+                ws.append([
+                    book.get('title', ''),
+                    book.get('url', ''),
+                    book.get('status', '未知'),
+                    book.get('reading_count', '未知'),
+                    book.get('last_update', '未知'),
+                    book.get('update_time', '未知')
+                ])
+            
+            wb.save(xlsx_path)
+            self.log(f"已保存书籍运营数据到: {xlsx_path}")
+        except Exception as e:
+            self.log(f"保存元数据失败: {str(e)}")
+            self.log(traceback.format_exc())
             
         added_tasks = [] # List of (task_id, book_url)
         

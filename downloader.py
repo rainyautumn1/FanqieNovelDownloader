@@ -15,7 +15,15 @@ class VerificationError(Exception):
 
 class BookFormatter(ABC):
     @abstractmethod
-    def initialize(self, book_data, save_dir, split_files):
+    def detect_existing_progress(self, book_data, save_dir, split_files):
+        """
+        检测已下载的进度。
+        返回: 已下载的最后一个章节的索引 (int), 如果没有则返回 -1
+        """
+        pass
+
+    @abstractmethod
+    def initialize(self, book_data, save_dir, split_files, append_mode=False):
         """
         初始化保存环境。
         返回: context (上下文对象，用于后续步骤)
@@ -36,9 +44,53 @@ class BookFormatter(ABC):
         返回: 最终文件或目录的路径
         """
         pass
+    
+    def get_final_path(self, save_dir, book_data, split_files):
+        """获取最终文件路径，用于跳过下载时返回"""
+        if split_files:
+            return os.path.join(save_dir, book_data['title'])
+        else:
+            # 默认实现，子类可覆盖
+            return os.path.join(save_dir, f"{book_data['title']}.txt")
 
 class TxtFormatter(BookFormatter):
-    def initialize(self, book_data, save_dir, split_files):
+    def detect_existing_progress(self, book_data, save_dir, split_files):
+        last_index = -1
+        
+        if split_files:
+            book_folder = os.path.join(save_dir, book_data['title'])
+            if os.path.exists(book_folder):
+                pattern = re.compile(r'^(\d{3})_')
+                for fname in os.listdir(book_folder):
+                    match = pattern.match(fname)
+                    if match:
+                        idx = int(match.group(1)) - 1
+                        if idx > last_index:
+                            last_index = idx
+        else:
+            filepath = os.path.join(save_dir, f"{book_data['title']}.txt")
+            if os.path.exists(filepath):
+                try:
+                    with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                        f.seek(0, 2)
+                        fsize = f.tell()
+                        seek_size = min(fsize, 20480) # 20KB
+                        f.seek(fsize - seek_size)
+                        content = f.read()
+                        
+                        matches = re.findall(r'=== (.+?) ===', content)
+                        if matches:
+                            last_title = matches[-1]
+                            # 倒序查找
+                            for i in range(len(book_data['chapters']) - 1, -1, -1):
+                                if book_data['chapters'][i]['title'] == last_title:
+                                    last_index = i
+                                    break
+                except:
+                    pass
+        return last_index
+
+    def initialize(self, book_data, save_dir, split_files, append_mode=False):
         context = {
             'book_data': book_data,
             'save_dir': save_dir,
@@ -53,23 +105,30 @@ class TxtFormatter(BookFormatter):
                 os.makedirs(book_folder)
             context['target_dir'] = book_folder
             
-            # 写简介
+            # 如果不是追加模式，或者简介不存在，则写入简介
             intro_path = os.path.join(book_folder, "000_简介.txt")
-            with open(intro_path, 'w', encoding='utf-8') as f:
-                f.write(f"Title: {book_data['title']}\n")
-                f.write(f"Author: {book_data['author']}\n")
-                f.write("="*20 + "\n\n")
-                f.write(f"{book_data.get('introduction', '')}\n")
+            if not append_mode or not os.path.exists(intro_path):
+                with open(intro_path, 'w', encoding='utf-8') as f:
+                    f.write(f"Title: {book_data['title']}\n")
+                    f.write(f"Author: {book_data['author']}\n")
+                    f.write("="*20 + "\n\n")
+                    f.write(f"{book_data.get('introduction', '')}\n")
         else:
             # 单文件
             filename = f"{book_data['title']}.txt"
             filepath = os.path.join(save_dir, filename)
-            f = open(filepath, 'w', encoding='utf-8')
-            f.write(f"Title: {book_data['title']}\n")
-            f.write(f"Author: {book_data['author']}\n")
-            f.write("="*20 + "\n\n")
-            f.write(f"简介:\n{book_data.get('introduction', '')}\n")
-            f.write("="*20 + "\n\n")
+            mode = 'a' if append_mode else 'w'
+            f = open(filepath, mode, encoding='utf-8')
+            
+            if not append_mode:
+                f.write(f"Title: {book_data['title']}\n")
+                f.write(f"Author: {book_data['author']}\n")
+                f.write("="*20 + "\n\n")
+                f.write(f"简介:\n{book_data.get('introduction', '')}\n")
+                f.write("="*20 + "\n\n")
+            else:
+                f.write("\n\n") # 追加模式下加个换行分隔
+                
             context['file_handle'] = f
             context['filepath'] = filepath
             
@@ -99,7 +158,41 @@ class TxtFormatter(BookFormatter):
             return context['filepath']
 
 class MdFormatter(BookFormatter):
-    def initialize(self, book_data, save_dir, split_files):
+    def detect_existing_progress(self, book_data, save_dir, split_files):
+        last_index = -1
+        if split_files:
+            book_folder = os.path.join(save_dir, book_data['title'])
+            if os.path.exists(book_folder):
+                pattern = re.compile(r'^(\d{3})_')
+                for fname in os.listdir(book_folder):
+                    match = pattern.match(fname)
+                    if match:
+                        idx = int(match.group(1)) - 1
+                        if idx > last_index:
+                            last_index = idx
+        else:
+            filepath = os.path.join(save_dir, f"{book_data['title']}.md")
+            if os.path.exists(filepath):
+                try:
+                    with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                        f.seek(0, 2)
+                        fsize = f.tell()
+                        seek_size = min(fsize, 20480)
+                        f.seek(fsize - seek_size)
+                        content = f.read()
+                        
+                        matches = re.findall(r'## (.+?)\n', content)
+                        if matches:
+                            last_title = matches[-1].strip()
+                            for i in range(len(book_data['chapters']) - 1, -1, -1):
+                                if book_data['chapters'][i]['title'] == last_title:
+                                    last_index = i
+                                    break
+                except:
+                    pass
+        return last_index
+
+    def initialize(self, book_data, save_dir, split_files, append_mode=False):
         context = {
             'book_data': book_data,
             'save_dir': save_dir,
@@ -114,20 +207,27 @@ class MdFormatter(BookFormatter):
             context['target_dir'] = book_folder
             
             intro_path = os.path.join(book_folder, "000_简介.md")
-            with open(intro_path, 'w', encoding='utf-8') as f:
-                f.write(f"# {book_data['title']}\n")
-                f.write(f"**Author:** {book_data['author']}\n\n")
-                f.write("## 简介\n\n")
-                f.write(f"{book_data.get('introduction', '')}\n")
+            if not append_mode or not os.path.exists(intro_path):
+                with open(intro_path, 'w', encoding='utf-8') as f:
+                    f.write(f"# {book_data['title']}\n")
+                    f.write(f"**Author:** {book_data['author']}\n\n")
+                    f.write("## 简介\n\n")
+                    f.write(f"{book_data.get('introduction', '')}\n")
         else:
             filename = f"{book_data['title']}.md"
             filepath = os.path.join(save_dir, filename)
-            f = open(filepath, 'w', encoding='utf-8')
-            f.write(f"# {book_data['title']}\n")
-            f.write(f"**Author:** {book_data['author']}\n\n")
-            f.write("## 简介\n\n")
-            f.write(f"{book_data.get('introduction', '')}\n\n")
-            f.write("---\n\n")
+            mode = 'a' if append_mode else 'w'
+            f = open(filepath, mode, encoding='utf-8')
+            
+            if not append_mode:
+                f.write(f"# {book_data['title']}\n")
+                f.write(f"**Author:** {book_data['author']}\n\n")
+                f.write("## 简介\n\n")
+                f.write(f"{book_data.get('introduction', '')}\n\n")
+                f.write("---\n\n")
+            else:
+                f.write("\n\n---\n\n") # Append separator
+                
             context['file_handle'] = f
             context['filepath'] = filepath
             
@@ -157,7 +257,10 @@ class MdFormatter(BookFormatter):
             return context['filepath']
 
 class EpubFormatter(BookFormatter):
-    def initialize(self, book_data, save_dir, split_files):
+    def detect_existing_progress(self, book_data, save_dir, split_files):
+        return -1
+
+    def initialize(self, book_data, save_dir, split_files, append_mode=False):
         # EPUB 忽略 split_files
         book = epub.EpubBook()
         book.set_identifier(f'fanqie-{int(time.time())}')
@@ -433,6 +536,73 @@ class FanqieDownloader:
                     else:
                         books.append({'title': title, 'url': full_url})
                         seen_books[full_url] = {'index': len(books)-1, 'from_img': from_img}
+
+                    # --- 提取额外元数据 (状态, 在读, 更新) ---
+                    # 获取当前书籍对象的引用
+                    if full_url in seen_books:
+                        current_book = books[seen_books[full_url]['index']]
+                    else:
+                        # 理论上不应该走到这里，因为上面已经添加了
+                        continue
+
+                    # 如果元数据尚未提取 (避免重复提取)
+                    if 'status' not in current_book:
+                        status = "未知"
+                        reading_count = "未知"
+                        last_update = "未知"
+                        update_time = "未知"
+
+                        # 尝试查找包含元数据的父容器
+                        # 通常这些信息在链接的父级或祖父级的文本中
+                        # 我们向上查找直到找到包含 "连载中" 或 "已完结" 的容器，或者达到一定的深度
+                        container = link.parent
+                        found_meta = False
+                        for _ in range(3): # 向上查找最多3层
+                            if container and container.name != 'body':
+                                text = container.get_text(" ", strip=True)
+                                if '连载中' in text or '已完结' in text:
+                                    found_meta = True
+                                    break
+                                container = container.parent
+                            else:
+                                break
+                        
+                        if found_meta and container:
+                            text = container.get_text(" ", strip=True)
+                            
+                            # 状态
+                            m_status = re.search(r'(连载中|已完结)', text)
+                            if m_status:
+                                status = m_status.group(1)
+                            
+                            # 在读
+                            m_read = re.search(r'在读[:：]?\s*([\d\.万]+)', text)
+                            if m_read:
+                                reading_count = m_read.group(1)
+                                
+                            # 最近更新
+                            if '最近更新' in text:
+                                # 简单的分割提取
+                                parts = text.split('最近更新')
+                                if len(parts) > 1:
+                                    update_part = parts[1].strip()
+                                    # 尝试提取时间 (yyyy-mm-dd HH:MM or yyyy-mm-dd)
+                                    m_date = re.search(r'(\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2})?)', update_part)
+                                    if m_date:
+                                        update_time = m_date.group(1)
+                                        # 截取到时间之前的部分作为章节名
+                                        last_update = update_part[:m_date.start()].strip(" :：|")
+                                    else:
+                                        # 如果没找到时间，就取前一段
+                                        last_update = update_part.strip(" :：|")
+
+                        current_book.update({
+                            'status': status,
+                            'reading_count': reading_count,
+                            'last_update': last_update,
+                            'update_time': update_time
+                        })
+
             
             return books
         except Exception as e:
@@ -459,26 +629,70 @@ class FanqieDownloader:
         else:
             time.sleep(delay)
 
-    def save_book(self, book_data, save_dir, formatter, chapter_indices=None, split_files=False, control_callback=None, delay=-1, progress_callback=None):
+    def save_book(self, book_data, save_dir, formatter, chapter_indices=None, split_files=False, control_callback=None, delay=-1, progress_callback=None, max_chapters=0):
         """
         通用的书籍保存方法，使用策略模式。
+        max_chapters: 限制下载的章节数量（0表示不限制）。
+                      如果是新下载，则下载前N章。
+                      如果是增量更新，则下载接下来的N章。
         """
-        chapters_to_download = []
-        if chapter_indices:
-             for idx in chapter_indices:
-                 if 0 <= idx < len(book_data['chapters']):
-                     chapters_to_download.append(book_data['chapters'][idx])
-        else:
-            chapters_to_download = book_data['chapters']
+        # 0. 自动增量检测
+        # 仅当 chapter_indices 为 None (全本下载) 时才启用增量检测
+        # 如果用户手动选择了章节范围，则完全遵从用户选择
+        append_mode = False
+        if chapter_indices is None:
+            last_index = formatter.detect_existing_progress(book_data, save_dir, split_files)
+            if last_index >= 0:
+                start_idx = last_index + 1
+                if start_idx < len(book_data['chapters']):
+                     # 有新章节，自动生成新的 indices
+                     end_idx = len(book_data['chapters'])
+                     
+                     # 应用 max_chapters 限制
+                     if max_chapters > 0:
+                         limit_end = start_idx + max_chapters
+                         if limit_end < end_idx:
+                             end_idx = limit_end
+                             
+                     chapter_indices = list(range(start_idx, end_idx))
+                     append_mode = True
+                     
+                     msg = f"检测到本地进度 (已下载至第 {last_index+1} 章)，将从第 {start_idx+1} 章开始续传"
+                     if max_chapters > 0:
+                         msg += f" (限制更新 {max_chapters} 章)"
+                     msg += "..."
+                     
+                     if progress_callback:
+                         progress_callback(0, 0, msg)
+                else:
+                    # 已经全部下载
+                    if progress_callback:
+                        progress_callback(0, 0, f"书籍已是最新 (共 {len(book_data['chapters'])} 章)，跳过下载。")
+                    return formatter.get_final_path(save_dir, book_data, split_files)
 
-        total_chapters = len(chapters_to_download)
+        chapters_to_download = []
+        
+        # 确保 chapter_indices 有值
+        if chapter_indices is None:
+            end_idx = len(book_data['chapters'])
+            # 如果是全新下载且有限制
+            if max_chapters > 0:
+                end_idx = min(max_chapters, end_idx)
+            chapter_indices = list(range(end_idx))
+
+        # 过滤有效索引
+        valid_indices = [idx for idx in chapter_indices if 0 <= idx < len(book_data['chapters'])]
+        
+        total_chapters = len(valid_indices)
         
         # 1. 初始化
-        context = formatter.initialize(book_data, save_dir, split_files)
+        context = formatter.initialize(book_data, save_dir, split_files, append_mode)
         
         try:
             # 2. 循环下载
-            for i, chapter in enumerate(chapters_to_download):
+            for i, real_idx in enumerate(valid_indices):
+                chapter = book_data['chapters'][real_idx]
+                
                 if control_callback:
                     control_callback()
 
@@ -488,7 +702,8 @@ class FanqieDownloader:
                 content = self.get_chapter_content(chapter['url'])
                 
                 # 3. 写入章节
-                formatter.write_chapter(context, chapter, content, i)
+                # 注意：传递真实的章节索引 real_idx，确保文件名序号正确 (e.g. 051_xxx.txt)
+                formatter.write_chapter(context, chapter, content, real_idx)
                 
                 # 4. 休眠
                 self._sleep(delay)
@@ -505,11 +720,11 @@ class FanqieDownloader:
                     pass
             raise e
 
-    def save_to_txt(self, book_data, save_dir, progress_callback=None, chapter_indices=None, split_files=False, control_callback=None, delay=-1):
-        return self.save_book(book_data, save_dir, TxtFormatter(), chapter_indices, split_files, control_callback, delay, progress_callback)
+    def save_to_txt(self, book_data, save_dir, progress_callback=None, chapter_indices=None, split_files=False, control_callback=None, delay=-1, max_chapters=0):
+        return self.save_book(book_data, save_dir, TxtFormatter(), chapter_indices, split_files, control_callback, delay, progress_callback, max_chapters)
 
-    def save_to_md(self, book_data, save_dir, progress_callback=None, chapter_indices=None, split_files=False, control_callback=None, delay=-1):
-        return self.save_book(book_data, save_dir, MdFormatter(), chapter_indices, split_files, control_callback, delay, progress_callback)
+    def save_to_md(self, book_data, save_dir, progress_callback=None, chapter_indices=None, split_files=False, control_callback=None, delay=-1, max_chapters=0):
+        return self.save_book(book_data, save_dir, MdFormatter(), chapter_indices, split_files, control_callback, delay, progress_callback, max_chapters)
 
-    def save_to_epub(self, book_data, save_dir, progress_callback=None, chapter_indices=None, control_callback=None, delay=-1):
-        return self.save_book(book_data, save_dir, EpubFormatter(), chapter_indices, False, control_callback, delay, progress_callback)
+    def save_to_epub(self, book_data, save_dir, progress_callback=None, chapter_indices=None, control_callback=None, delay=-1, max_chapters=0):
+        return self.save_book(book_data, save_dir, EpubFormatter(), chapter_indices, False, control_callback, delay, progress_callback, max_chapters)

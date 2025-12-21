@@ -36,7 +36,7 @@ class BatchOptionsDialog(QDialog):
         
         # 章节限制
         h2 = QHBoxLayout()
-        h2.addWidget(QLabel("每本限制章节 (0为全部):"))
+        h2.addWidget(QLabel("每本更新/下载章节数 (0为全部):"))
         self.spin_chapter_limit = QSpinBox()
         self.spin_chapter_limit.setRange(0, 5000)
         self.spin_chapter_limit.setValue(0)
@@ -145,7 +145,7 @@ class ChapterSelectionDialog(QDialog):
         grp_box = QGroupBox("章节选择")
         grp_layout = QVBoxLayout(grp_box)
         
-        self.radio_all = QRadioButton(f"全部章节 (共 {self.total_chapters} 章)")
+        self.radio_all = QRadioButton(f"全部章节 (共 {self.total_chapters} 章) - 支持自动追更")
         self.radio_all.setChecked(True)
         grp_layout.addWidget(self.radio_all)
         

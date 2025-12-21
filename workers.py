@@ -88,6 +88,35 @@ class BatchDownloadWorker(QThread):
                     self.log_signal.emit(f"获取书籍信息失败: {book.get('url')} - {str(e)}")
                     # 失败不影响继续，只是标题可能不准
 
+            # --- 保存书籍元数据到 CSV ---
+            try:
+                import csv
+                csv_path = os.path.join(self.save_dir, "books_metadata.csv")
+                
+                # 使用追加模式，避免覆盖已有数据
+                file_exists = os.path.exists(csv_path)
+                
+                with open(csv_path, 'a', newline='', encoding='utf-8-sig') as f:
+                    writer = csv.writer(f)
+                    if not file_exists:
+                        writer.writerow(['书名', 'URL', '状态', '在读人数', '最新章节', '更新时间'])
+                    
+                    for book in target_books:
+                        writer.writerow([
+                            book.get('title', ''),
+                            book.get('url', ''),
+                            book.get('status', '未知'),
+                            book.get('reading_count', '未知'),
+                            book.get('last_update', '未知'),
+                            book.get('update_time', '未知')
+                        ])
+                
+                self.log_signal.emit(f"已保存书籍运营数据到: {csv_path}")
+            except Exception as e:
+                self.log_signal.emit(f"保存元数据失败: {str(e)}")
+                import traceback
+                self.log_signal.emit(traceback.format_exc())
+
             success_count = 0
 
             for i, book in enumerate(target_books):
@@ -110,9 +139,7 @@ class BatchDownloadWorker(QThread):
                     # 确定章节
                     indices = None
                     if self.chapters_count > 0:
-                        limit = min(self.chapters_count, len(book_info['chapters']))
-                        indices = list(range(limit))
-                        self.log_signal.emit(f"  - 仅下载前 {limit} 章")
+                        self.log_signal.emit(f"  - 限制更新/下载 {self.chapters_count} 章")
                     
                     # 定义回调
                     def callback(curr, tot, title):
@@ -129,7 +156,8 @@ class BatchDownloadWorker(QThread):
                             chapter_indices=indices,
                             split_files=self.split_files,
                             control_callback=self.check_control_status,
-                            delay=self.delay
+                            delay=self.delay,
+                            max_chapters=self.chapters_count
                         )
                     elif self.fmt == 'md':
                         filepath = self.downloader.save_to_md(
@@ -139,7 +167,8 @@ class BatchDownloadWorker(QThread):
                             chapter_indices=indices,
                             split_files=self.split_files,
                             control_callback=self.check_control_status,
-                            delay=self.delay
+                            delay=self.delay,
+                            max_chapters=self.chapters_count
                         )
                     else: # epub格式
                         filepath = self.downloader.save_to_epub(
@@ -148,7 +177,8 @@ class BatchDownloadWorker(QThread):
                             callback,
                             chapter_indices=indices,
                             control_callback=self.check_control_status,
-                            delay=self.delay
+                            delay=self.delay,
+                            max_chapters=self.chapters_count
                         )
                     
                     self.log_signal.emit(f"[{i+1}/{total_books}] 完成: {real_title} -> {filepath}")
