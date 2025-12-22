@@ -472,3 +472,4 @@ if __name__ == "__main__":
         os.remove(CONFIG_FILE)
     check_update()
     sys.exit(0)
+

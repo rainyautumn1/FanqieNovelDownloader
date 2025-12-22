@@ -14,7 +14,7 @@ import logging
 from logging_config import setup_logging
 from downloader import FanqieDownloader
 from workers import BatchDownloadWorker, BookInfoWorker, DownloadWorker, RankParserWorker, TitleCorrectionWorker
-from ui_components import CustomWebEngineView, CustomWebEnginePage, ChapterSelectionDialog, BatchOptionsDialog
+from ui_components import CustomWebEngineView, CustomWebEnginePage, ChapterSelectionDialog, BatchOptionsDialog, FAQDialog
 from download_manager import DownloadManager
 from download_ui import DownloadManagerWindow
 from update_manager import check_update
@@ -87,6 +87,7 @@ class MainWindow(QMainWindow):
         self.download_window.pause_all_signal.connect(self.download_manager.pause_all)
         self.download_window.cancel_all_signal.connect(self.download_manager.cancel_all)
         self.download_window.clear_finished_signal.connect(self.download_window.clear_finished_items)
+        self.download_window.max_concurrent_changed.connect(self.download_manager.set_max_concurrent_tasks)
         
         # Manager -> UI
         self.download_manager.task_added.connect(self.on_task_added)
@@ -94,6 +95,7 @@ class MainWindow(QMainWindow):
         self.download_manager.task_status_changed.connect(self.download_window.update_downloading_item_status)
         self.download_manager.task_finished.connect(self.on_task_finished)
         self.download_manager.task_removed.connect(self.download_window.remove_downloading_item)
+        self.download_manager.verification_needed.connect(self.on_verification_needed)
 
     def on_task_updated(self, task_id, current, total, msg):
         # 获取任务对象以检查是否有标题更新
@@ -130,6 +132,85 @@ class MainWindow(QMainWindow):
         
         # 弹窗提示
         # QMessageBox.information(self, "下载完成", f"《{title}》下载完成！")
+
+    def on_verification_needed(self, task_id, url):
+        """处理验证码请求"""
+        # 1. 恢复窗口如果被最小化
+        if self.isMinimized():
+            self.showNormal()
+        
+        # 2. 激活窗口到前台
+        self.activateWindow()
+        self.raise_()
+        
+        # 3. 浏览器加载验证码页面
+        self.web_view.setUrl(QUrl(url))
+        
+        # 4. 检查是否已经有验证弹窗，避免重复
+        if hasattr(self, 'verification_dialog') and self.verification_dialog.isVisible():
+            return
+
+        # 5. 显示非模态对话框，允许用户操作浏览器
+        self.verification_dialog = QMessageBox(self)
+        self.verification_dialog.setWindowTitle("等待验证完成")
+        self.verification_dialog.setText("检测到番茄小说安全验证，下载已暂停。\n\n1. 请在主界面浏览器中完成验证码操作。\n2. 验证完成后，点击下方按钮恢复下载。\n\n提示：您可以拖动此窗口以免遮挡验证码。")
+        self.verification_dialog.setIcon(QMessageBox.Information)
+        
+        # 添加自定义按钮
+        self.resume_btn = self.verification_dialog.addButton("验证已完成，前往下载管理", QMessageBox.AcceptRole)
+        self.resume_btn.setEnabled(False) # 初始禁用，等待验证通过
+        
+        # 设置为非模态，允许用户操作主窗口
+        self.verification_dialog.setWindowModality(Qt.NonModal)
+        # 保持在顶层
+        self.verification_dialog.setWindowFlags(self.verification_dialog.windowFlags() | Qt.WindowStaysOnTopHint)
+        
+        # 连接按钮点击事件
+        self.resume_btn.clicked.connect(self.on_verification_completed)
+        
+        # 监听标题变化，自动检测验证是否完成
+        self.web_view.titleChanged.connect(self.check_verification_status)
+        self.web_view.loadFinished.connect(lambda _: self.check_verification_status(self.web_view.title()))
+        
+        self.verification_dialog.show()
+
+    def check_verification_status(self, title):
+        """检查页面标题，判断验证是否完成"""
+        if not hasattr(self, 'verification_dialog') or not self.verification_dialog.isVisible():
+            return
+
+        # 简单的反向检查：如果标题不包含这些关键字，认为是正常页面
+        # 注意：这里可能需要根据实际情况微调
+        if "WAF" not in title and "验证" not in title and "Security" not in title:
+             # 双重检查：确保不是空标题
+             if title and len(title) > 0:
+                 if hasattr(self, 'resume_btn'):
+                    self.resume_btn.setEnabled(True)
+                    self.resume_btn.setText("验证已通过，点击前往下载管理")
+        else:
+             if hasattr(self, 'resume_btn'):
+                self.resume_btn.setEnabled(False)
+                self.resume_btn.setText("等待验证完成...")
+
+    def on_verification_completed(self):
+        """用户点击验证完成按钮"""
+        if hasattr(self, 'verification_dialog'):
+            # 断开信号连接，避免资源泄露或后续误触
+            try:
+                self.web_view.titleChanged.disconnect(self.check_verification_status)
+                # loadFinished 的 lambda 比较难断开，但由于 dialog 销毁，影响不大，或者我们可以把 lambda 换成具名函数
+            except:
+                pass
+            self.verification_dialog.close()
+        
+        # 通知管理器验证已完成，恢复下载
+        if hasattr(self, 'download_manager'):
+            self.download_manager.resolve_verification()
+
+        # 显示并激活下载管理窗口
+        self.download_window.show()
+        self.download_window.raise_()
+        self.download_window.activateWindow()
 
     def open_file_folder(self, path):
         try:
@@ -297,6 +378,12 @@ class MainWindow(QMainWindow):
         self.bili_btn.clicked.connect(lambda: self.open_bilibili_link())
         control_layout.addWidget(self.bili_btn)
 
+        # 常见问题按钮
+        self.faq_btn = QPushButton("常见问题")
+        self.faq_btn.setStyleSheet("background-color: #FF9800; color: white; font-weight: bold;")
+        self.faq_btn.clicked.connect(self.show_faq)
+        control_layout.addWidget(self.faq_btn)
+
         # 检查更新按钮
         self.update_btn = QPushButton("检查更新")
         self.update_btn.setStyleSheet("font-weight: bold;")
@@ -360,6 +447,17 @@ class MainWindow(QMainWindow):
         # 使用自定义历史记录状态
         self.back_btn.setEnabled(self.history_index > 0)
         self.forward_btn.setEnabled(self.history_index < len(self.custom_history) - 1)
+
+    def closeEvent(self, event):
+        """处理窗口关闭事件"""
+        # 保存 cookies
+        self.save_cookies()
+        
+        # 停止所有下载任务
+        if hasattr(self, 'download_manager'):
+            self.download_manager.stop_all()
+            
+        event.accept()
 
     def on_back_custom(self):
         if self.history_index > 0:
@@ -717,9 +815,12 @@ class MainWindow(QMainWindow):
         QMessageBox.warning(self, "错误", f"解析榜单失败: {err}")
 
     def open_bilibili_link(self):
-        from PySide6.QtGui import QDesktopServices
-        url = QUrl("https://space.bilibili.com/16111026?spm_id_from=333.1365.0.0")
-        QDesktopServices.openUrl(url)
+        import webbrowser
+        webbrowser.open("https://space.bilibili.com/3493264627943530")
+
+    def show_faq(self):
+        dialog = FAQDialog(self)
+        dialog.exec()
 
 if __name__ == "__main__":
     if hasattr(Qt, 'AA_EnableHighDpiScaling'):

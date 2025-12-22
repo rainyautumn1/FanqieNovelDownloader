@@ -4,3 +4,4 @@ lxml
 ebooklib
 PySide6
 openpyxl
+

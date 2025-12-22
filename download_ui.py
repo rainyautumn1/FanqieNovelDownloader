@@ -2,7 +2,7 @@ import os
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                              QPushButton, QListWidget, QListWidgetItem, 
                              QStackedWidget, QProgressBar, QDialog, QFrame,
-                             QScrollArea, QSizePolicy)
+                             QScrollArea, QSizePolicy, QSpinBox)
 from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtGui import QIcon, QFont
 
@@ -150,6 +150,7 @@ class DownloadManagerWindow(QWidget):
     pause_all_signal = Signal()
     cancel_all_signal = Signal()
     clear_finished_signal = Signal()
+    max_concurrent_changed = Signal(int)
     
     def __init__(self, parent=None):
         super().__init__(parent, Qt.Window)
@@ -240,6 +241,19 @@ class DownloadManagerWindow(QWidget):
         
         top_bar.addStretch()
         
+        # 同时下载数量设置
+        lbl_concurrent = QLabel("同时下载数:")
+        top_bar.addWidget(lbl_concurrent)
+        
+        self.spin_concurrent = QSpinBox()
+        self.spin_concurrent.setRange(1, 10)
+        self.spin_concurrent.setValue(1)
+        self.spin_concurrent.setToolTip("设置同时下载的任务数量")
+        self.spin_concurrent.valueChanged.connect(self.on_concurrent_changed)
+        top_bar.addWidget(self.spin_concurrent)
+        
+        top_bar.addSpacing(20)
+
         btn_start_all = QPushButton("全部开始")
         btn_start_all.clicked.connect(self.start_all_signal.emit)
         top_bar.addWidget(btn_start_all)
@@ -255,7 +269,7 @@ class DownloadManagerWindow(QWidget):
         layout.addLayout(top_bar)
         
         # 警告提示
-        self.warning_label = QLabel("温馨提示：由于平台反爬策略，当前只能单线程下载。您可以暂停当前任务来优先下载其他书籍（点击另一本书的开始/继续会自动暂停当前书籍）。")
+        self.warning_label = QLabel("温馨提示：同时下载数量越多，触发验证码的风险越高！当出现验证码时，所有下载将自动暂停，请配合完成验证。")
         self.warning_label.setStyleSheet("color: #E6A23C; background-color: #FDF6EC; padding: 8px; border-radius: 4px; border: 1px solid #FAECD8;")
         self.warning_label.setWordWrap(True)
         layout.addWidget(self.warning_label)
@@ -272,6 +286,15 @@ class DownloadManagerWindow(QWidget):
         # 这里为了简单，直接放在 layout 里，实际可以通过显隐控制
         # 更好的做法是用 StackedWidget 包裹 List 和 EmptyLabel，这里简化处理
         
+    def on_concurrent_changed(self, value):
+        self.max_concurrent_changed.emit(value)
+        if value > 1:
+            self.warning_label.setText(f"温馨提示：当前设置为 {value} 线程下载，请注意：并发数越高，触发验证码的几率越大！")
+            self.warning_label.setStyleSheet("color: #F56C6C; background-color: #FEF0F0; padding: 8px; border-radius: 4px; border: 1px solid #FDE2E2;")
+        else:
+            self.warning_label.setText("温馨提示：单线程下载最安全，不易触发验证码。")
+            self.warning_label.setStyleSheet("color: #E6A23C; background-color: #FDF6EC; padding: 8px; border-radius: 4px; border: 1px solid #FAECD8;")
+
     def setup_finished_page(self):
         layout = QVBoxLayout(self.page_finished)
         

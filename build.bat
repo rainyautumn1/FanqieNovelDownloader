@@ -56,3 +56,4 @@ if exist "dist\FanqieNovelDownloader\FanqieNovelDownloader.exe" (
 )
 echo ==========================================
 pause
+

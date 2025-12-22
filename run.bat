@@ -10,3 +10,4 @@ if %errorlevel% neq 0 (
 echo Starting Fanqie Downloader...
 python main.py
 pause
+

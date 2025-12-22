@@ -629,7 +629,7 @@ class FanqieDownloader:
         else:
             time.sleep(delay)
 
-    def save_book(self, book_data, save_dir, formatter, chapter_indices=None, split_files=False, control_callback=None, delay=-1, progress_callback=None, max_chapters=0):
+    def save_book(self, book_data, save_dir, formatter, chapter_indices=None, split_files=False, control_callback=None, delay=-1, progress_callback=None, max_chapters=0, verification_callback=None):
         """
         通用的书籍保存方法，使用策略模式。
         max_chapters: 限制下载的章节数量（0表示不限制）。
@@ -699,8 +699,20 @@ class FanqieDownloader:
                 if progress_callback:
                     progress_callback(i + 1, total_chapters, chapter['title'])
                 
-                content = self.get_chapter_content(chapter['url'])
-                
+                content = None
+                while True:
+                    try:
+                        content = self.get_chapter_content(chapter['url'])
+                        break
+                    except VerificationError:
+                        if verification_callback:
+                            # 调用验证回调，通常这会暂停程序直到用户解决验证码
+                            verification_callback(chapter['url'])
+                            # 回调返回后（用户点击继续），继续循环重试
+                            continue
+                        else:
+                            raise
+
                 # 3. 写入章节
                 # 注意：传递真实的章节索引 real_idx，确保文件名序号正确 (e.g. 051_xxx.txt)
                 formatter.write_chapter(context, chapter, content, real_idx)
@@ -720,11 +732,11 @@ class FanqieDownloader:
                     pass
             raise e
 
-    def save_to_txt(self, book_data, save_dir, progress_callback=None, chapter_indices=None, split_files=False, control_callback=None, delay=-1, max_chapters=0):
-        return self.save_book(book_data, save_dir, TxtFormatter(), chapter_indices, split_files, control_callback, delay, progress_callback, max_chapters)
+    def save_to_txt(self, book_data, save_dir, progress_callback=None, chapter_indices=None, split_files=False, control_callback=None, delay=-1, max_chapters=0, verification_callback=None):
+        return self.save_book(book_data, save_dir, TxtFormatter(), chapter_indices, split_files, control_callback, delay, progress_callback, max_chapters, verification_callback)
 
-    def save_to_md(self, book_data, save_dir, progress_callback=None, chapter_indices=None, split_files=False, control_callback=None, delay=-1, max_chapters=0):
-        return self.save_book(book_data, save_dir, MdFormatter(), chapter_indices, split_files, control_callback, delay, progress_callback, max_chapters)
+    def save_to_md(self, book_data, save_dir, progress_callback=None, chapter_indices=None, split_files=False, control_callback=None, delay=-1, max_chapters=0, verification_callback=None):
+        return self.save_book(book_data, save_dir, MdFormatter(), chapter_indices, split_files, control_callback, delay, progress_callback, max_chapters, verification_callback)
 
-    def save_to_epub(self, book_data, save_dir, progress_callback=None, chapter_indices=None, control_callback=None, delay=-1, max_chapters=0):
-        return self.save_book(book_data, save_dir, EpubFormatter(), chapter_indices, False, control_callback, delay, progress_callback, max_chapters)
+    def save_to_epub(self, book_data, save_dir, progress_callback=None, chapter_indices=None, control_callback=None, delay=-1, max_chapters=0, verification_callback=None):
+        return self.save_book(book_data, save_dir, EpubFormatter(), chapter_indices, False, control_callback, delay, progress_callback, max_chapters, verification_callback)

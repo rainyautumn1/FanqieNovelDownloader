@@ -1,6 +1,9 @@
-from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QSpinBox, QComboBox, QCheckBox, QPushButton, QGroupBox, QRadioButton, QLineEdit, QDoubleSpinBox, QMessageBox
+from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QSpinBox, QComboBox, QCheckBox, QPushButton, QGroupBox, QRadioButton, QLineEdit, QDoubleSpinBox, QMessageBox, QTextBrowser
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEnginePage
+from PySide6.QtCore import QThread, Signal
+import requests
+import os
 
 class BatchOptionsDialog(QDialog):
     def __init__(self, parent=None):
@@ -272,3 +275,62 @@ class ChapterSelectionDialog(QDialog):
             indices = sorted(list(set(indices)))
             
         return indices, split, delay, fmt
+
+class UpdateFAQWorker(QThread):
+    finished = Signal(str)
+
+    def run(self):
+        # 考虑到中国大陆用户访问 GitHub 可能存在困难，配置多个镜像源
+        # 优先尝试国内访问友好的加速源
+        urls = [
+            # jsDelivr CDN (通常国内速度快，稳定性高)
+            "https://cdn.jsdelivr.net/gh/rainyautumn1/FanqieNovelDownloader@main/faq.txt",
+            # GhProxy 镜像 (针对 GitHub Raw 的反代)
+            "https://mirror.ghproxy.com/https://raw.githubusercontent.com/rainyautumn1/FanqieNovelDownloader/main/faq.txt",
+            # GitHub 原始地址 (作为兜底)
+            "https://raw.githubusercontent.com/rainyautumn1/FanqieNovelDownloader/main/faq.txt"
+        ]
+
+        for url in urls:
+            try:
+                # 设置较短的超时时间，以便快速切换到下一个源
+                response = requests.get(url, timeout=5)
+                if response.status_code == 200:
+                    content = response.text
+                    # 简单验证一下内容是否有效（避免获取到错误页面）
+                    if content and len(content) > 10:
+                        self.finished.emit(content)
+                        return
+            except:
+                continue
+        
+        # 如果所有源都失败
+        self.finished.emit("# 获取失败\n\n无法连接到服务器获取最新常见问题，请检查您的网络连接。")
+
+class FAQDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("常见问题 (在线)")
+        self.resize(600, 500)
+        self.setup_ui()
+        self.fetch_faq()
+
+    def setup_ui(self):
+        layout = QVBoxLayout(self)
+        self.text_browser = QTextBrowser()
+        self.text_browser.setOpenExternalLinks(True)
+        self.text_browser.setText("正在从服务器获取最新常见问题，请稍候...")
+        layout.addWidget(self.text_browser)
+        
+        close_btn = QPushButton("关闭")
+        close_btn.clicked.connect(self.close)
+        layout.addWidget(close_btn)
+
+    def fetch_faq(self):
+        self.worker = UpdateFAQWorker()
+        self.worker.finished.connect(self.on_faq_updated)
+        self.worker.start()
+
+    def on_faq_updated(self, content):
+        if content:
+            self.text_browser.setMarkdown(content)

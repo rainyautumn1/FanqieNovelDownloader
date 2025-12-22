@@ -33,15 +33,23 @@ class DownloadManager(QObject):
     task_status_changed = Signal(str, str) # id, status
     task_finished = Signal(str, str, str) # id, title, filepath
     task_removed = Signal(str) # id
+    verification_needed = Signal(str, str) # id, url
     
     def __init__(self, downloader):
         super().__init__()
         self.downloader = downloader
         self.tasks = [] # List of DownloadTask
+        self.max_concurrent_tasks = 1 # 默认单线程
+        self.verification_active = False # 验证码状态标记
         self.queue_timer = QTimer()
         self.queue_timer.timeout.connect(self.process_queue)
         self.queue_timer.start(1000) # 每秒检查一次队列
         
+    def set_max_concurrent_tasks(self, count):
+        self.max_concurrent_tasks = count
+        # 设置变更后立即检查队列
+        self.process_queue()
+
     def add_single_task(self, book_url, save_dir, fmt, book_info=None, chapter_indices=None, split_files=False, delay=-1, chapter_limit=0, title=None):
         task = DownloadTask('single', 
                           book_url=book_url, 
@@ -87,8 +95,34 @@ class DownloadManager(QObject):
         worker.progress_signal.connect(lambda c, t, s, tid=task.id: self._on_worker_progress(tid, c, t, s))
         worker.finished_signal.connect(lambda path, tid=task.id: self._on_worker_finished(tid, path))
         worker.error_signal.connect(lambda err, tid=task.id: self._on_worker_error(tid, err))
+        worker.verification_needed_signal.connect(lambda url, tid=task.id: self._on_verification_needed(tid, url))
         # log 信号暂时不需要在 UI 列表显示，或者显示在 status_msg 中
         
+    def stop_all(self):
+        """停止所有任务，用于程序退出"""
+        self.queue_timer.stop()
+        for task in self.tasks:
+            if task.worker and task.worker.isRunning():
+                task.worker.stop()
+                if not task.worker.wait(2000): # 等待2秒
+                    task.worker.terminate() # 强制终止
+
+    def _on_verification_needed(self, task_id, url):
+        # 标记验证状态
+        self.verification_active = True
+        
+        # 暂停所有正在运行的任务（包括当前任务）
+        self.pause_all()
+        
+        # 转发验证信号
+        self.verification_needed.emit(task_id, url)
+        
+    def resolve_verification(self):
+        """验证完成后调用，恢复调度"""
+        self.verification_active = False
+        # 尝试恢复所有被暂停的任务（变为waiting，由queue重新调度）
+        self.start_all()
+
     def _on_worker_progress(self, task_id, current, total, msg):
         task = self.get_task(task_id)
         if task:
@@ -134,26 +168,35 @@ class DownloadManager(QObject):
         return None
 
     def process_queue(self):
-        # 简单的串行队列策略：
-        # 1. 检查是否有 'running' 任务
+        # 如果处于验证状态，暂停调度
+        if self.verification_active:
+            return
+
+        # 1. 检查正在运行的任务数量
         running_tasks = [t for t in self.tasks if t.status == 'running']
-        if running_tasks:
-            return # 有任务在跑，等待
+        running_count = len(running_tasks)
+        
+        # 2. 如果运行数小于最大并发数，调度新任务
+        if running_count < self.max_concurrent_tasks:
+            # 计算还可以启动几个
+            slots_available = self.max_concurrent_tasks - running_count
             
-        # 2. 如果没有，查找 'waiting' 任务
-        waiting_tasks = [t for t in self.tasks if t.status == 'waiting']
-        if waiting_tasks:
-            next_task = waiting_tasks[0]
-            self.start_task(next_task.id)
+            # 查找 'waiting' 任务
+            waiting_tasks = [t for t in self.tasks if t.status == 'waiting']
+            
+            # 启动可用名额的任务
+            for i in range(min(slots_available, len(waiting_tasks))):
+                next_task = waiting_tasks[i]
+                self.start_task(next_task.id)
 
     def start_task(self, task_id):
         task = self.get_task(task_id)
         if not task: return
         
-        # 强制暂停其他正在运行的任务（单线程限制）
-        for t in self.tasks:
-            if t.id != task_id and t.status == 'running':
-                self.pause_task(t.id)
+        # 移除强制单线程逻辑
+        # for t in self.tasks:
+        #    if t.id != task_id and t.status == 'running':
+        #        self.pause_task(t.id)
 
         if task.status in ['waiting', 'paused', 'error']:
             task.status = 'running'

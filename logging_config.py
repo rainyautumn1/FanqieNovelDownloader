@@ -74,3 +74,4 @@ def setup_logging(log_dir="logs", max_bytes=5*1024*1024, backup_count=5):
 
     logging.info("日志系统初始化完成")
     return log_signal
+

@@ -10,6 +10,7 @@ class BatchDownloadWorker(QThread):
     log_signal = Signal(str)
     finished_signal = Signal(str) # 摘要
     error_signal = Signal(str)
+    verification_needed_signal = Signal(str)
 
     def __init__(self, downloader, rank_url, save_dir, top_n=5, chapters_count=0, fmt='txt', split_files=False, delay=-1):
         super().__init__()
@@ -250,6 +251,7 @@ class DownloadWorker(QThread):
     log_signal = Signal(str)
     finished_signal = Signal(str) # 文件路径
     error_signal = Signal(str)
+    verification_needed_signal = Signal(str)
 
     def __init__(self, downloader, book_url, save_dir, fmt, book_info=None, chapter_indices=None, split_files=False, delay=-1, chapter_limit=0):
         super().__init__()
@@ -313,6 +315,11 @@ class DownloadWorker(QThread):
             def callback(current, total, title):
                 self.progress_signal.emit(current, total, title)
 
+            def verify_cb(url):
+                self.verification_needed_signal.emit(url)
+                self.pause()
+                self.check_control_status()
+
             if self.fmt == 'txt':
                 filepath = self.downloader.save_to_txt(
                     self.book_info, 
@@ -321,7 +328,8 @@ class DownloadWorker(QThread):
                     chapter_indices=self.chapter_indices,
                     split_files=self.split_files,
                     control_callback=self.check_control_status,
-                    delay=self.delay
+                    delay=self.delay,
+                    verification_callback=verify_cb
                 )
             elif self.fmt == 'md':
                 filepath = self.downloader.save_to_md(
@@ -331,7 +339,8 @@ class DownloadWorker(QThread):
                     chapter_indices=self.chapter_indices,
                     split_files=self.split_files,
                     control_callback=self.check_control_status,
-                    delay=self.delay
+                    delay=self.delay,
+                    verification_callback=verify_cb
                 )
             else:
                 filepath = self.downloader.save_to_epub(
@@ -340,7 +349,8 @@ class DownloadWorker(QThread):
                     callback,
                     chapter_indices=self.chapter_indices,
                     control_callback=self.check_control_status,
-                    delay=self.delay
+                    delay=self.delay,
+                    verification_callback=verify_cb
                 )
             
             self.finished_signal.emit(filepath)
