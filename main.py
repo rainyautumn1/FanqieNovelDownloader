@@ -23,7 +23,7 @@ from version import VERSION
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"番茄小说内置浏览器下载器 (SVIP支持) v{VERSION}")
+        self.setWindowTitle(f"番茄小说下载器内置浏览器版 v{VERSION}")
         self.resize(1200, 800)
 
         # 设置窗口图标
@@ -54,6 +54,9 @@ class MainWindow(QMainWindow):
         self.is_navigating_history = False
 
         self.setup_ui()
+        
+        # 显式显示开源声明弹窗 (只在第一次显示，或者每次启动都显示？用户要求显著标记，建议放在主界面上方或弹窗)
+        # 这里选择在 UI 初始化后，在主界面顶部添加一个显著的 Banner
         
         # 初始化日志系统
         self.log_signal = setup_logging()
@@ -283,6 +286,35 @@ class MainWindow(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
+
+        # === 开源声明 Banner ===
+        notice_frame = QWidget()
+        # 使用更现代清新的渐变背景色 (浅蓝 -> 浅白) 和 柔和的阴影/圆角
+        notice_frame.setStyleSheet("""
+            QWidget {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #E3F2FD, stop:1 #F8F9FA);
+                border: 1px solid #B0BEC5;
+                border-radius: 6px;
+            }
+        """)
+        notice_layout = QVBoxLayout(notice_frame)
+        notice_layout.setContentsMargins(15, 10, 15, 10)
+        
+        notice_text = (
+            "<p style='margin:0; font-weight:bold; color: #D32F2F; font-size: 15px;'>⚠️ 绝对免费！本项目是开源项目，如果您是付费购买的，请立即退款并举报商家。</p>"
+            "<p style='margin:6px 0 0 0; color: #455A64; font-size: 13px;'>项目地址：<a href='https://github.com/rainyautumn1/FanqieNovelDownloader' style='color:#1976D2; text-decoration: none; font-weight: bold;'>https://github.com/rainyautumn1/FanqieNovelDownloader</a> 如果觉得本软件好用，请给作者一个star</p>"
+            "<p style='margin:4px 0 0 0; color: #455A64; font-size: 13px;'>软件使用有疑问欢迎到B站私信作者，不过请优先点击【常见问题】按钮，里面应该有解答。</p>"
+        )
+        notice_label = QLabel(notice_text)
+        notice_label.setTextFormat(Qt.RichText)
+        notice_label.setOpenExternalLinks(True)
+        notice_label.setWordWrap(True)
+        # 标签背景透明，避免遮挡渐变
+        notice_label.setStyleSheet("background: transparent; border: none;")
+        
+        notice_layout.addWidget(notice_label)
+        main_layout.addWidget(notice_frame)
+        # =======================
 
         # 导航栏
         nav_layout = QHBoxLayout()

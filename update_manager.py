@@ -105,13 +105,24 @@ class CheckWorker(QThread):
         return None
 
     def get_remote_changelog(self):
+        # 1. 尝试 jsDelivr CDN (最快且稳定)
+        cdn_url = f"https://cdn.jsdelivr.net/gh/{GITHUB_REPO}@main/CHANGELOG.md"
+        try:
+            resp = requests.get(cdn_url, timeout=3)
+            if resp.status_code == 200:
+                resp.encoding = 'utf-8'
+                return resp.text
+        except:
+            pass
+
+        # 2. 尝试镜像
         raw_path = f"https://github.com/{GITHUB_REPO}/raw/main/CHANGELOG.md"
-        # 尝试通过镜像获取
         for mirror in MIRRORS:
             try:
                 url = f"{mirror}{raw_path}"
                 resp = requests.get(url, timeout=5)
                 if resp.status_code == 200:
+                    resp.encoding = 'utf-8'
                     return resp.text
             except:
                 continue
@@ -223,7 +234,7 @@ class UpdateDialog(QDialog):
             UpdateConfig.set_skip_today()
             
         if self.remote_ver and version.parse(self.remote_ver) > version.parse(CURRENT_VERSION):
-            QMessageBox.information(self, "手动更新", "如果您稍后想更新，请运行目录下的 'update_manager.py' 文件。")
+            QMessageBox.information(self, "手动更新", "如果您稍后想更新，请点击软件上的检查更新按钮。")
             
         self.reject()
 
@@ -262,7 +273,59 @@ def check_update(parent=None, force=False):
     
     return True
 
+class DownloadDialog(QDialog):
+    def __init__(self, remote_ver, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("下载更新")
+        self.setFixedSize(600, 300)  # 增加宽度和高度
+        
+        layout = QVBoxLayout(self)
+        
+        # 标题
+        title = QLabel(f"<h3>发现新版本 v{remote_ver}</h3>")
+        title.setTextFormat(Qt.RichText)
+        layout.addWidget(title)
+        
+        # 提示文本
+        info = QLabel("由于成本问题（服务器太贵了，GitHUB下载太慢了），请前往 <b>123云盘</b> 下载最新安装包：")
+        info.setTextFormat(Qt.RichText)
+        layout.addWidget(info)
+        
+        # 链接显示 (使用 QTextBrowser 支持复制)
+        self.link_browser = QTextBrowser()
+        self.link_browser.setOpenExternalLinks(True)
+        self.link_browser.setHtml(
+            "<p>链接: <a href='https://www.123865.com/s/eUDATd-2iuod?pwd=djtd#'>https://www.123865.com/s/eUDATd-2iuod?pwd=djtd#</a></p>"
+            "<p><b>提取码: djtd</b></p>"
+            "<p style='color: #666;'>提示：您可以选中上方链接并复制 (Ctrl+C)，然后在浏览器中打开。</p>"
+        )
+        # 设置样式使其看起来像普通文本但可复制
+        self.link_browser.setStyleSheet("background-color: #f0f0f0; border: 1px solid #ccc; padding: 10px; font-size: 14px;")
+        self.link_browser.setFixedHeight(120)
+        layout.addWidget(self.link_browser)
+        
+        # 底部说明
+        footer = QLabel("下载完成后，请直接覆盖安装即可。")
+        layout.addWidget(footer)
+        
+        # 按钮
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        
+        btn_ok = QPushButton("确定")
+        btn_ok.clicked.connect(self.accept)
+        btn_ok.setFixedSize(100, 35)
+        btn_layout.addWidget(btn_ok)
+        
+        layout.addLayout(btn_layout)
+
 def do_update(remote_ver, parent=None):
+    # 检查是否为打包后的 EXE 环境
+    if getattr(sys, 'frozen', False):
+        dialog = DownloadDialog(remote_ver, parent)
+        dialog.exec()
+        return
+
     """执行更新逻辑 (复用之前的逻辑)"""
     
     # 创建进度条
@@ -272,66 +335,6 @@ def do_update(remote_ver, parent=None):
     progress.show()
     progress.setValue(10)
     QApplication.processEvents()
-
-    # 检查是否为打包后的 EXE 环境
-    if getattr(sys, 'frozen', False):
-        progress.setLabelText("正在下载最新安装包...")
-        QApplication.processEvents()
-        
-        exe_url = f"https://github.com/{GITHUB_REPO}/releases/download/v{remote_ver}/FanqieDownloader_Setup.exe"
-        exe_filename = f"FanqieDownloader_Setup_v{remote_ver}.exe"
-        exe_path = os.path.join(os.path.dirname(sys.executable), exe_filename)
-        
-        download_success = False
-        
-        # 尝试下载 EXE
-        for mirror in MIRRORS:
-            try:
-                # GitHub Release 的文件也需要通过镜像下载
-                # 注意：很多镜像站对 release 的支持格式可能不同，这里尝试通用格式
-                # 常见格式: https://mirror/https://github.com/...
-                url = f"{mirror}{exe_url}"
-                print(f"尝试下载安装包: {url}")
-                
-                resp = requests.get(url, stream=True, timeout=30)
-                if resp.status_code == 200:
-                    total_size = int(resp.headers.get('content-length', 0))
-                    downloaded = 0
-                    with open(exe_path, 'wb') as f:
-                        for chunk in resp.iter_content(chunk_size=8192):
-                            if chunk:
-                                f.write(chunk)
-                                downloaded += len(chunk)
-                                # 更新进度条 (20-90)
-                                if total_size > 0:
-                                    p = 20 + int((downloaded / total_size) * 70)
-                                    progress.setValue(p)
-                                    QApplication.processEvents()
-                    download_success = True
-                    break
-            except Exception as e:
-                print(f"下载失败: {e}")
-        
-        if not download_success:
-            QMessageBox.warning(parent, "更新失败", f"无法下载安装包。\n请手动访问 GitHub 下载最新版 v{remote_ver}。")
-            return
-
-        progress.setValue(100)
-        progress.setLabelText("下载完成，正在启动安装程序...")
-        
-        reply = QMessageBox.question(parent, "下载完成", 
-                                     f"安装包已下载到:\n{exe_path}\n\n是否立即运行安装程序？\n(注意：安装时请先关闭本软件)",
-                                     QMessageBox.Yes | QMessageBox.No)
-        
-        if reply == QMessageBox.Yes:
-            try:
-                # 启动安装程序
-                os.startfile(exe_path)
-                # 退出当前程序
-                sys.exit(0)
-            except Exception as e:
-                QMessageBox.critical(parent, "错误", f"无法启动安装程序: {e}")
-        return
 
     # 1. 优先尝试 Git Pull (开发环境)
     if os.path.exists(".git"):
@@ -472,4 +475,3 @@ if __name__ == "__main__":
         os.remove(CONFIG_FILE)
     check_update()
     sys.exit(0)
-
