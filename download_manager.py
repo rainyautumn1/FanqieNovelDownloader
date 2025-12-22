@@ -14,6 +14,7 @@ class DownloadTask:
         self.progress = (0, 0)
         self.status_msg = ""
         self.filepath = ""
+        self.cover_url = kwargs.get('cover_url', "")
         
         # 提取标题
         if task_type == 'single':
@@ -28,7 +29,7 @@ class DownloadTask:
             self.title = "批量下载任务"
 
 class DownloadManager(QObject):
-    task_added = Signal(str, str) # id, title
+    task_added = Signal(str, str, str) # id, title, cover_url
     task_updated = Signal(str, int, int, str) # id, current, total, msg
     task_status_changed = Signal(str, str) # id, status
     task_finished = Signal(str, str, str) # id, title, filepath
@@ -50,7 +51,7 @@ class DownloadManager(QObject):
         # 设置变更后立即检查队列
         self.process_queue()
 
-    def add_single_task(self, book_url, save_dir, fmt, book_info=None, chapter_indices=None, split_files=False, delay=-1, chapter_limit=0, title=None):
+    def add_single_task(self, book_url, save_dir, fmt, book_info=None, chapter_indices=None, split_files=False, delay=-1, chapter_limit=0, title=None, cover_url=None):
         task = DownloadTask('single', 
                           book_url=book_url, 
                           save_dir=save_dir, 
@@ -60,14 +61,15 @@ class DownloadManager(QObject):
                           split_files=split_files, 
                           delay=delay,
                           chapter_limit=chapter_limit,
-                          title=title)
+                          title=title,
+                          cover_url=cover_url)
         
         # 初始化 Worker (但不启动)
         worker = DownloadWorker(self.downloader, book_url, save_dir, fmt, book_info, chapter_indices, split_files, delay, chapter_limit)
         self._setup_worker(task, worker)
         
         self.tasks.append(task)
-        self.task_added.emit(task.id, task.title)
+        self.task_added.emit(task.id, task.title, task.cover_url)
         return task.id
         
     def add_batch_task(self, rank_url, save_dir, top_n=5, chapters_count=0, fmt='txt', split_files=False, delay=-1):
