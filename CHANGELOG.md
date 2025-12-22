@@ -19,6 +19,11 @@
 - **程序退出优化**: 修复了关闭软件时可能出现的 `QThread: Destroyed while thread is still running` 报错，实现了优雅的线程清理与退出逻辑。
 - **交互体验**: 优化了验证码弹窗体验，现在弹窗支持非模态显示（不妨碍浏览器操作），并增加了“拖动窗口”提示。
 
+## 📢 重要说明
+- **永久免费，开源万岁**：如果您是付费购买的本软件，请立即退款并举报商家！
+- **项目地址**：[https://github.com/rainyautumn1/FanqieNovelDownloader](https://github.com/rainyautumn1/FanqieNovelDownloader)
+- 如果觉得本软件好用，请给作者一个 **Star** ⭐️，这是更新最大的动力！
+
 ## [2025-12-21] - v1.1.1 版本更新
 
 ### ✨ 新增功能与优化
