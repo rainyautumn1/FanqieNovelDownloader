@@ -79,6 +79,8 @@ class CheckWorker(QThread):
         self.finished.emit(remote_ver, changelog, error_msg)
 
     def get_remote_version(self):
+        remote_ver = None
+        
         # 1. 尝试 jsDelivr CDN
         cdn_url = f"https://cdn.jsdelivr.net/gh/{GITHUB_REPO}@main/version.py"
         try:
@@ -86,7 +88,12 @@ class CheckWorker(QThread):
             if resp.status_code == 200:
                 for line in resp.text.splitlines():
                     if line.strip().startswith("VERSION"):
-                        return line.split('"')[1]
+                        ver = line.split('"')[1]
+                        # 如果CDN版本确实比当前版本新，直接返回
+                        if version.parse(ver) > version.parse(CURRENT_VERSION):
+                            return ver
+                        # 否则记录下来，继续尝试其他源（因为CDN可能有缓存）
+                        remote_ver = ver
         except:
             pass
 
@@ -99,10 +106,17 @@ class CheckWorker(QThread):
                 if resp.status_code == 200:
                     for line in resp.text.splitlines():
                         if line.strip().startswith("VERSION"):
-                            return line.split('"')[1]
+                            ver = line.split('"')[1]
+                            # 镜像源通常更新较快，如果有更新的版本，直接返回
+                            if version.parse(ver) > version.parse(CURRENT_VERSION):
+                                return ver
+                            # 如果镜像源版本和CDN一样或者比CDN新，更新remote_ver
+                            if remote_ver is None or version.parse(ver) > version.parse(remote_ver):
+                                remote_ver = ver
             except:
                 continue
-        return None
+        
+        return remote_ver
 
     def get_remote_changelog(self):
         # 1. 尝试 jsDelivr CDN (最快且稳定)
