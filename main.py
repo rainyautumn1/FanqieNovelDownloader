@@ -105,8 +105,8 @@ class MainWindow(QMainWindow):
         # 在UI更新时传递标题
         self.download_window.update_downloading_item(task_id, current, total, msg, title)
 
-    def on_task_added(self, task_id, title, cover_url=""):
-        widget = self.download_window.add_downloading_item(task_id, title, cover_url)
+    def on_task_added(self, task_id, title):
+        widget = self.download_window.add_downloading_item(task_id, title)
         # 连接单个任务的操作信号
         widget.action_triggered.connect(self.handle_task_action)
         
@@ -124,13 +124,8 @@ class MainWindow(QMainWindow):
     def on_task_finished(self, task_id, title, filepath):
         # 移除正在下载列表
         self.download_window.remove_downloading_item(task_id)
-        
-        # 获取任务信息以获取 cover_url
-        task = self.download_manager.get_task(task_id)
-        cover_url = task.cover_url if task else None
-        
         # 添加到完成列表
-        widget = self.download_window.add_finished_item(task_id, title, filepath, cover_url)
+        widget = self.download_window.add_finished_item(task_id, title, filepath)
         # 连接完成项的操作信号
         widget.open_folder_signal.connect(self.open_file_folder)
         widget.delete_signal.connect(self.delete_finished_record)
@@ -600,8 +595,7 @@ class MainWindow(QMainWindow):
             chapter_indices=indices, 
             split_files=split_files,
             delay=delay,
-            title=book_info.get('title'),
-            cover_url=book_info.get('cover_url')
+            title=book_info.get('title')
         )
         
         self.log("任务已添加至下载队列")
@@ -801,8 +795,7 @@ class MainWindow(QMainWindow):
                 split_files=split_files,
                 delay=delay,
                 chapter_limit=chapter_limit,
-                title=book.get('title'),
-                cover_url=book.get('cover_url')
+                title=book.get('title')
             )
             added_tasks.append((task_id, book['url']))
             

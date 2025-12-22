@@ -269,29 +269,6 @@ class EpubFormatter(BookFormatter):
         book.add_author(book_data['author'])
         book.add_metadata('DC', 'description', book_data.get('introduction', ''))
         
-        # 尝试下载并设置封面
-        cover_url = book_data.get('cover_url')
-        if cover_url:
-            try:
-                # 简单的下载逻辑，不依赖外部 downloader 实例
-                headers = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Referer': 'https://fanqienovel.com/'
-                }
-                res = requests.get(cover_url, headers=headers, timeout=15)
-                if res.status_code == 200:
-                    image_content = res.content
-                    # 简单的后缀判断
-                    ext = 'jpg'
-                    if cover_url.lower().endswith('.png'):
-                        ext = 'png'
-                    elif cover_url.lower().endswith('.jpeg'):
-                        ext = 'jpeg'
-                    
-                    book.set_cover(f"cover.{ext}", image_content)
-            except:
-                pass # 封面下载失败不影响书籍生成
-        
         spine = []
         toc = []
         
@@ -401,18 +378,6 @@ class FanqieDownloader:
             author = author_tag.get_text(strip=True) if author_tag else "Unknown_Author"
             author = self.decode_text(author)
 
-            # 尝试获取封面图片
-            cover_url = ""
-            img_tag = soup.select_one('.page-header-img img') or soup.select_one('.book-img img') or soup.select_one('.book-info-cover img')
-            if img_tag:
-                cover_url = img_tag.get('src')
-                # 检查 lazy load 属性
-                if not cover_url or 'default' in cover_url or 'placeholder' in cover_url:
-                    cover_url = img_tag.get('data-src') or cover_url
-                
-                if cover_url and not cover_url.startswith('http'):
-                     cover_url = 'https:' + cover_url
-
             # 尝试获取简介
             intro_tag = soup.select_one('.page-abstract-content')
             introduction = intro_tag.get_text(strip=True) if intro_tag else "No introduction available."
@@ -438,7 +403,6 @@ class FanqieDownloader:
                 'title': title,
                 'author': author,
                 'introduction': introduction,
-                'cover_url': cover_url,
                 'chapters': chapters
             }
         except Exception as e:
@@ -530,22 +494,12 @@ class FanqieDownloader:
                     
                     title = ""
                     from_img = False
-                    cover_url = ""
 
                     # 1. 优先尝试从图片 alt 获取标题 (通常最准确且无干扰)
                     img = link.find('img')
-                    if img:
-                        if img.get('alt'):
-                            title = img.get('alt')
-                            from_img = True
-                        
-                        # 提取封面 URL
-                        src = img.get('src')
-                        if src:
-                            if not src.startswith('http'):
-                                cover_url = 'https:' + src
-                            else:
-                                cover_url = src
+                    if img and img.get('alt'):
+                        title = img.get('alt')
+                        from_img = True
                     
                     # 尝试查找其他可能的标题来源
                     if not title:
@@ -579,13 +533,8 @@ class FanqieDownloader:
                         if not entry['from_img'] and from_img:
                              books[entry['index']]['title'] = title
                              entry['from_img'] = True
-                        
-                        # 如果之前没有封面，现在有了，更新之
-                        if cover_url and not books[entry['index']].get('cover_url'):
-                             books[entry['index']]['cover_url'] = cover_url
-
                     else:
-                        books.append({'title': title, 'url': full_url, 'cover_url': cover_url})
+                        books.append({'title': title, 'url': full_url})
                         seen_books[full_url] = {'index': len(books)-1, 'from_img': from_img}
 
                     # --- 提取额外元数据 (状态, 在读, 更新) ---
