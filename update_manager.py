@@ -1,4 +1,3 @@
-
 import os
 import sys
 import requests
@@ -79,53 +78,17 @@ class CheckWorker(QThread):
         self.finished.emit(remote_ver, changelog, error_msg)
 
     def get_remote_version(self):
-<<<<<<< HEAD
-        remote_ver = None
-        
-        # 1. 尝试 jsDelivr CDN
-        cdn_url = f"https://cdn.jsdelivr.net/gh/{GITHUB_REPO}@main/version.py"
-=======
         # 1. 尝试腾讯云COS (唯一来源)
         cos_url = "https://version-1312206787.cos.ap-chengdu.myqcloud.com/version.py"
->>>>>>> 33cbf9150b38a7fe022d57f78d77a51010d28858
         try:
             resp = requests.get(cos_url, timeout=10)
             if resp.status_code == 200:
                 for line in resp.text.splitlines():
                     if line.strip().startswith("VERSION"):
-                        ver = line.split('"')[1]
-                        # 如果CDN版本确实比当前版本新，直接返回
-                        if version.parse(ver) > version.parse(CURRENT_VERSION):
-                            return ver
-                        # 否则记录下来，继续尝试其他源（因为CDN可能有缓存）
-                        remote_ver = ver
+                        return line.split('"')[1]
         except:
             pass
-<<<<<<< HEAD
-
-        # 2. 尝试镜像
-        raw_path = f"https://github.com/{GITHUB_REPO}/raw/main/version.py"
-        for mirror in MIRRORS:
-            try:
-                url = f"{mirror}{raw_path}"
-                resp = requests.get(url, timeout=5)
-                if resp.status_code == 200:
-                    for line in resp.text.splitlines():
-                        if line.strip().startswith("VERSION"):
-                            ver = line.split('"')[1]
-                            # 镜像源通常更新较快，如果有更新的版本，直接返回
-                            if version.parse(ver) > version.parse(CURRENT_VERSION):
-                                return ver
-                            # 如果镜像源版本和CDN一样或者比CDN新，更新remote_ver
-                            if remote_ver is None or version.parse(ver) > version.parse(remote_ver):
-                                remote_ver = ver
-            except:
-                continue
-        
-        return remote_ver
-=======
         return None
->>>>>>> 33cbf9150b38a7fe022d57f78d77a51010d28858
 
     def get_remote_changelog(self):
         # 1. 尝试腾讯云COS (唯一来源)
