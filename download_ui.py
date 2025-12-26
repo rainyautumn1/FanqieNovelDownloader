@@ -90,6 +90,12 @@ class DownloadingItemWidget(QWidget):
         if not pixmap.isNull():
             self.icon_label.setPixmap(pixmap)
 
+    def load_cover(self, cover_url):
+        if cover_url:
+            self.loader = ImageLoaderThread(cover_url)
+            self.loader.loaded.connect(self.set_cover_image)
+            self.loader.start()
+
     def update_progress(self, current, total, status_text):
         self.current_progress = current
         if total > 0:
@@ -405,7 +411,15 @@ class DownloadManagerWindow(QWidget):
             if widget.task_id == task_id:
                 widget.update_status(status)
                 return
-                
+
+    def update_downloading_item_cover(self, task_id, cover_url):
+        for i in range(self.list_downloading.count()):
+            item = self.list_downloading.item(i)
+            widget = self.list_downloading.itemWidget(item)
+            if widget.task_id == task_id:
+                widget.load_cover(cover_url)
+                return
+
     def add_finished_item(self, task_id, title, filepath, cover_url=None):
         item = QListWidgetItem(self.list_finished)
         widget = FinishedItemWidget(task_id, title, filepath, cover_url=cover_url)

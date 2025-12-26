@@ -79,53 +79,28 @@ class CheckWorker(QThread):
         self.finished.emit(remote_ver, changelog, error_msg)
 
     def get_remote_version(self):
-        # 1. 尝试 jsDelivr CDN
-        cdn_url = f"https://cdn.jsdelivr.net/gh/{GITHUB_REPO}@main/version.py"
+        # 1. 尝试腾讯云COS (唯一来源)
+        cos_url = "https://version-1312206787.cos.ap-chengdu.myqcloud.com/version.py"
         try:
-            resp = requests.get(cdn_url, timeout=3)
+            resp = requests.get(cos_url, timeout=10)
             if resp.status_code == 200:
                 for line in resp.text.splitlines():
                     if line.strip().startswith("VERSION"):
                         return line.split('"')[1]
         except:
             pass
-
-        # 2. 尝试镜像
-        raw_path = f"https://github.com/{GITHUB_REPO}/raw/main/version.py"
-        for mirror in MIRRORS:
-            try:
-                url = f"{mirror}{raw_path}"
-                resp = requests.get(url, timeout=5)
-                if resp.status_code == 200:
-                    for line in resp.text.splitlines():
-                        if line.strip().startswith("VERSION"):
-                            return line.split('"')[1]
-            except:
-                continue
         return None
 
     def get_remote_changelog(self):
-        # 1. 尝试 jsDelivr CDN (最快且稳定)
-        cdn_url = f"https://cdn.jsdelivr.net/gh/{GITHUB_REPO}@main/CHANGELOG.md"
+        # 1. 尝试腾讯云COS (唯一来源)
+        cos_url = "https://version-1312206787.cos.ap-chengdu.myqcloud.com/CHANGELOG.md"
         try:
-            resp = requests.get(cdn_url, timeout=3)
+            resp = requests.get(cos_url, timeout=10)
             if resp.status_code == 200:
                 resp.encoding = 'utf-8'
                 return resp.text
         except:
             pass
-
-        # 2. 尝试镜像
-        raw_path = f"https://github.com/{GITHUB_REPO}/raw/main/CHANGELOG.md"
-        for mirror in MIRRORS:
-            try:
-                url = f"{mirror}{raw_path}"
-                resp = requests.get(url, timeout=5)
-                if resp.status_code == 200:
-                    resp.encoding = 'utf-8'
-                    return resp.text
-            except:
-                continue
         return "无法获取更新日志。"
 
 class UpdateDialog(QDialog):

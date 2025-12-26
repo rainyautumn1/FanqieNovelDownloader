@@ -4,6 +4,7 @@ import time
 import os
 import re
 import json
+import html
 import random
 from ebooklib import epub
 from abc import ABC, abstractmethod
@@ -301,6 +302,116 @@ class EpubFormatter(BookFormatter):
         # EPUB 忽略 split_files
         book = epub.EpubBook()
 
+        # 定义 CSS 样式
+        style = '''
+        @font-face {
+            font-family: "Source Han Serif SC";
+            src: url("fonts/SourceHanSerifSC-Regular.otf");
+            font-weight: normal;
+            font-style: normal;
+        }
+        body {
+            font-family: "Source Han Serif SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+            line-height: 1.8;
+            text-align: justify;
+            margin: 0;
+            padding: 0;
+        }
+        p {
+            text-indent: 2em;
+            margin-bottom: 0.8em;
+            margin-top: 0;
+        }
+        h1 {
+            text-align: center;
+            font-weight: bold;
+            margin-top: 2em;
+            margin-bottom: 1.5em;
+            color: #333;
+            page-break-before: always;
+        }
+        h2 {
+            text-align: center;
+            font-weight: bold;
+            margin-top: 1.5em;
+            margin-bottom: 1em;
+            color: #555;
+        }
+        .intro-page {
+            text-indent: 0;
+            padding: 20px;
+            margin: 20px;
+            border: 1px solid #ddd;
+            background-color: #f9f9f9;
+            border-radius: 5px;
+        }
+        .intro-title {
+            text-align: center;
+            font-size: 1.5em;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        .intro-info {
+            text-align: center;
+            color: #666;
+            margin-bottom: 20px;
+            font-size: 0.9em;
+        }
+        .intro-content {
+            line-height: 1.6;
+            color: #444;
+        }
+        img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+            margin: 10px auto;
+            border-radius: 3px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .cover-img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+            margin: 0 auto;
+        }
+        /* 目录样式 */
+        .toc-page {
+            padding: 0 10px;
+        }
+        .toc-title {
+            text-align: center;
+            font-size: 1.6em;
+            font-weight: bold;
+            margin-top: 1em;
+            margin-bottom: 1.5em;
+            color: #333;
+        }
+        .toc-list {
+            list-style-type: none;
+            padding: 0;
+            margin: 0;
+        }
+        .toc-item {
+            margin-bottom: 5px;
+            border-bottom: 1px dashed #f0f0f0;
+        }
+        .toc-item a {
+            display: block;
+            text-decoration: none;
+            color: #444;
+            padding: 10px 5px;
+            font-size: 0.95em;
+            transition: color 0.2s, background-color 0.2s;
+        }
+        .toc-item a:hover {
+            color: #d32f2f;
+            background-color: #fafafa;
+        }
+        '''
+        nav_css = epub.EpubItem(uid="style_nav", file_name="style/nav.css", media_type="text/css", content=style)
+        book.add_item(nav_css)
+
         # 设置封面
         if book_data.get('cover_url') and downloader:
             try:
@@ -324,10 +435,21 @@ class EpubFormatter(BookFormatter):
         spine = []
         toc = []
         
-        # 简介
-        intro_content = book_data.get('introduction', '').replace('\n', '<br/>')
-        c_intro = epub.EpubHtml(title='简介', file_name='intro.xhtml', lang='zh')
-        c_intro.content = f'<h1>简介</h1><p>{intro_content}</p>'
+        # 简介 (美化版)
+        intro_text = book_data.get('introduction', '')
+        intro_content = html.escape(intro_text).replace('\n', '<br/>')
+        intro_html = f'''
+        <div class="intro-page">
+            <div class="intro-title">{html.escape(book_data['title'])}</div>
+            <div class="intro-info">作者：{html.escape(book_data['author'])}</div>
+            <hr style="border: 0; border-top: 1px solid #eee; margin: 15px 0;">
+            <div class="intro-content">{intro_content}</div>
+        </div>
+        '''
+        c_intro = epub.EpubHtml(title='书籍信息', file_name='intro.xhtml', lang='zh')
+        c_intro.content = intro_html
+        c_intro.add_item(nav_css) # 引用样式
+        
         book.add_item(c_intro)
         spine.append(c_intro)
         toc.append(c_intro)
@@ -338,19 +460,20 @@ class EpubFormatter(BookFormatter):
             'spine': spine,
             'toc': toc,
             'save_dir': save_dir,
-            'title': book_data['title']
+            'title': book_data['title'],
+            'css': nav_css
         }
 
     def write_chapter(self, context, chapter_data, content, index):
         html_parts = []
         
         if isinstance(content, str):
-            html_parts = [f"<p>{line}</p>" for line in content.split('\n\n')]
+            html_parts = [f"<p>{html.escape(line)}</p>" for line in content.split('\n\n')]
         else:
             img_idx = 0
             for item in content:
                 if item['type'] == 'text':
-                    html_parts.append(f"<p>{item['data']}</p>")
+                    html_parts.append(f"<p>{html.escape(item['data'])}</p>")
                 elif item['type'] == 'image':
                     img_url = item['data']
                     if context.get('downloader'):
@@ -377,13 +500,14 @@ class EpubFormatter(BookFormatter):
                             html_parts.append(f'<img src="{img_filename}" alt="image" />')
                             img_idx += 1
                         else:
-                            html_parts.append(f'<p>[图片下载失败: {img_url}]</p>')
+                            html_parts.append(f'<p>[图片下载失败: {html.escape(img_url)}]</p>')
                     else:
-                        html_parts.append(f'<p>[图片: {img_url}]</p>')
+                        html_parts.append(f'<p>[图片: {html.escape(img_url)}]</p>')
 
         html_content = "".join(html_parts)
         c = epub.EpubHtml(title=chapter_data['title'], file_name=f'chap_{index+1}.xhtml', lang='zh')
-        c.content = f'<h1>{chapter_data["title"]}</h1>{html_content}'
+        c.content = f'<h1>{html.escape(chapter_data["title"])}</h1>{html_content}'
+        c.add_item(context['css']) # 引用样式
         
         context['book'].add_item(c)
         context['spine'].append(c)
@@ -393,8 +517,42 @@ class EpubFormatter(BookFormatter):
         book = context['book']
         book.toc = context['toc']
         book.add_item(epub.EpubNcx())
-        book.add_item(epub.EpubNav())
-        book.spine = ['nav'] + context['spine']
+        
+        # 生成自定义目录页 (HTML)
+        toc_html_parts = [
+            '<div class="toc-page">',
+            '<div class="toc-title">目录</div>',
+            '<ul class="toc-list">'
+        ]
+        
+        for item in context['toc']:
+            # item 是 EpubHtml 对象
+            link = item.file_name
+            title = item.title
+            toc_html_parts.append(f'<li class="toc-item"><a href="{link}">{html.escape(title)}</a></li>')
+            
+        toc_html_parts.append('</ul></div>')
+        
+        c_toc = epub.EpubHtml(title='目录', file_name='toc.xhtml', lang='zh')
+        c_toc.content = "\n".join(toc_html_parts)
+        c_toc.add_item(context['css'])
+        
+        # 添加到书籍项目
+        book.add_item(c_toc)
+        
+        # 调整 Spine 顺序: 插入到 Intro 之后 (index 1)
+        # 假设 context['spine'] 的第一个是 Intro
+        if len(context['spine']) > 0:
+            context['spine'].insert(1, c_toc)
+        else:
+            context['spine'].append(c_toc)
+        
+        # 添加标准的 Nav 文件 (用于阅读器导航菜单，但不放入 linear spine)
+        nav = epub.EpubNav()
+        book.add_item(nav)
+        
+        # 设置 Spine
+        book.spine = context['spine']
         
         filename = f"{context['title']}.epub"
         filepath = os.path.join(context['save_dir'], filename)
@@ -405,10 +563,27 @@ class EpubFormatter(BookFormatter):
 
 class FanqieDownloader:
     def __init__(self, cookies=None):
-        self.headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept-Language': 'en-US,en;q=0.9',
-        }
+        self.headers = {}
+        
+        # 生成高熵随机 User-Agent
+        self.headers['User-Agent'] = self._generate_random_ua()
+        
+        # 基础 Headers
+        self.headers.update({
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6',
+            'Connection': 'keep-alive',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'same-origin',
+            'Sec-Fetch-User': '?1',
+            'Upgrade-Insecure-Requests': '1',
+            'Cache-Control': 'max-age=0',
+        })
+        
+        # 根据随机生成的 UA 动态调整 Client Hints
+        self._update_client_hints()
+        
         self.cookies = cookies
         # 字符集来自研究（番茄小说混淆映射）
         # 注意：此映射可能会随时间变化。
@@ -436,6 +611,90 @@ class FanqieDownloader:
             '2', '音', '字', 'm', '呢', '明', '之', '前', '高', 'P', 'B', '目', '太', 'e', '9', '起', '稜', '她', '也',
             'W', '用', '方', '子', '英', '每', '理', '便', '西', '数', '期', '中', 'C', '外', '样', 'a', '海', '们', '任'
         ]
+
+    def _generate_random_ua(self):
+        """生成随机的高拟真 User-Agent"""
+        browsers = ['Chrome', 'Edge', 'Firefox', 'Safari']
+        weights = [0.6, 0.2, 0.15, 0.05] # Chrome 最常见
+        browser = random.choices(browsers, weights=weights)[0]
+        
+        os_type = random.choice(['Windows', 'Mac'])
+        
+        if os_type == 'Windows':
+            platform = 'Windows NT 10.0; Win64; x64'
+        else:
+            mac_versions = ['10_15_7', '11_6', '12_6', '13_5', '14_1']
+            platform = f'Macintosh; Intel Mac OS X {random.choice(mac_versions)}'
+
+        if browser == 'Chrome':
+            # Chrome 115-122
+            version_major = random.randint(115, 122)
+            version_minor = 0
+            version_build = random.randint(1000, 6000)
+            version_patch = random.randint(0, 200)
+            version = f"{version_major}.{version_minor}.{version_build}.{version_patch}"
+            return f"Mozilla/5.0 ({platform}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{version} Safari/537.36"
+            
+        elif browser == 'Edge':
+            # Edge 115-122
+            if os_type == 'Mac': # Edge on Mac exists but let's stick to Windows for Edge to be safe/common
+                return self._generate_random_ua()
+                
+            version_major = random.randint(115, 122)
+            version_build = random.randint(1000, 6000)
+            version = f"{version_major}.0.{version_build}.0"
+            return f"Mozilla/5.0 ({platform}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{version} Safari/537.36 Edg/{version}"
+
+        elif browser == 'Firefox':
+            # Firefox 110-123
+            version = random.randint(110, 123)
+            # Gecko trail
+            gecko_date = 20100101
+            return f"Mozilla/5.0 ({platform}; rv:{version}.0) Gecko/{gecko_date} Firefox/{version}.0"
+
+        elif browser == 'Safari':
+            if os_type == 'Windows': # Safari on Windows is dead
+                 return self._generate_random_ua()
+            
+            # Safari 16-17
+            version_major = random.randint(16, 17)
+            version_minor = random.randint(0, 6)
+            webkit_ver = "605.1.15"
+            return f"Mozilla/5.0 ({platform}) AppleWebKit/{webkit_ver} (KHTML, like Gecko) Version/{version_major}.{version_minor} Safari/{webkit_ver}"
+            
+        return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+    def _update_client_hints(self):
+        """根据 User-Agent 动态设置 Sec-CH-UA 头部"""
+        ua = self.headers['User-Agent']
+        
+        # 提取平台
+        platform = '"Windows"'
+        if 'Macintosh' in ua:
+            platform = '"macOS"'
+        elif 'Linux' in ua:
+            platform = '"Linux"'
+            
+        # 提取版本和品牌
+        if 'Edg/' in ua:
+            # Edge
+            match = re.search(r'Edg/(\d+)', ua)
+            ver = match.group(1) if match else "120"
+            self.headers['Sec-CH-UA'] = f'"Not_A Brand";v="8", "Chromium";v="{ver}", "Microsoft Edge";v="{ver}"'
+            self.headers['Sec-CH-UA-Mobile'] = '?0'
+            self.headers['Sec-CH-UA-Platform'] = platform
+        elif 'Chrome/' in ua:
+            # Chrome
+            match = re.search(r'Chrome/(\d+)', ua)
+            ver = match.group(1) if match else "120"
+            self.headers['Sec-CH-UA'] = f'"Not_A Brand";v="8", "Chromium";v="{ver}", "Google Chrome";v="{ver}"'
+            self.headers['Sec-CH-UA-Mobile'] = '?0'
+            self.headers['Sec-CH-UA-Platform'] = platform
+        else:
+            # Firefox/Safari
+            self.headers.pop('Sec-CH-UA', None)
+            self.headers.pop('Sec-CH-UA-Mobile', None)
+            self.headers.pop('Sec-CH-UA-Platform', None)
 
     def decode_char(self, char_code):
         if self.code_start <= char_code <= self.code_end:

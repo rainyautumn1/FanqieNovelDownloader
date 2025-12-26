@@ -38,6 +38,7 @@ class DownloadManager(QObject):
     task_finished = Signal(str, str, str, str) # id, title, filepath, cover_url
     task_removed = Signal(str) # id
     verification_needed = Signal(str, str) # id, url
+    cover_updated = Signal(str, str) # id, cover_url
     
     def __init__(self, downloader):
         super().__init__()
@@ -139,12 +140,18 @@ class DownloadManager(QObject):
             
             # 如果 worker 是 DownloadWorker，且有了 book_info，则更新 task.title
             if isinstance(task.worker, DownloadWorker) and task.worker.book_info:
+                # 检查标题更新
                 real_title = task.worker.book_info.get('title')
                 if real_title and real_title != task.title:
                     task.title = real_title
                     # 我们需要一个新的信号来通知 UI 更新标题，或者复用 task_updated
                     # 这里我们复用 task_updated，但 UI 需要能处理 title 变化
-                    # 也可以在 msg 中带上 title，但 msg 是给用户看的
+                
+                # 检查封面更新 (新增逻辑)
+                real_cover = task.worker.book_info.get('cover_url')
+                if real_cover and not task.cover_url:
+                    task.cover_url = real_cover
+                    self.cover_updated.emit(task_id, real_cover)
             
             self.task_updated.emit(task_id, current, total, msg)
             
