@@ -3,14 +3,36 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QListWidget, QListWidgetItem, 
                              QStackedWidget, QProgressBar, QDialog, QFrame,
                              QScrollArea, QSizePolicy, QSpinBox)
-from PySide6.QtCore import Qt, Signal, QSize
-from PySide6.QtGui import QIcon, QFont
+from PySide6.QtCore import Qt, Signal, QSize, QThread
+from PySide6.QtGui import QIcon, QFont, QPixmap
+import requests
+
+class ImageLoaderThread(QThread):
+    loaded = Signal(QPixmap)
+
+    def __init__(self, url):
+        super().__init__()
+        self.url = url
+
+    def run(self):
+        try:
+            if not self.url:
+                return
+            
+            # 简单的文件缓存检查 (可选，这里先只做内存加载)
+            response = requests.get(self.url, timeout=10)
+            if response.status_code == 200:
+                pixmap = QPixmap()
+                pixmap.loadFromData(response.content)
+                self.loaded.emit(pixmap)
+        except Exception:
+            pass
 
 class DownloadingItemWidget(QWidget):
     # 信号：任务ID, 操作类型 ('pause', 'resume', 'cancel')
     action_triggered = Signal(str, str)
     
-    def __init__(self, task_id, title, status="等待中", parent=None):
+    def __init__(self, task_id, title, status="等待中", cover_url=None, parent=None):
         super().__init__(parent)
         self.task_id = task_id
         self.current_progress = 0
@@ -20,9 +42,16 @@ class DownloadingItemWidget(QWidget):
         
         # 图标占位
         self.icon_label = QLabel()
-        self.icon_label.setFixedSize(40, 40)
-        self.icon_label.setStyleSheet("background-color: #E0E0E0; border-radius: 5px;")
+        self.icon_label.setFixedSize(40, 53) # 调整为书籍封面比例
+        self.icon_label.setStyleSheet("background-color: #E0E0E0; border-radius: 3px;")
+        self.icon_label.setScaledContents(True)
         layout.addWidget(self.icon_label)
+        
+        # 加载封面
+        if cover_url:
+            self.loader = ImageLoaderThread(cover_url)
+            self.loader.loaded.connect(self.set_cover_image)
+            self.loader.start()
         
         # 信息区
         info_layout = QVBoxLayout()
@@ -56,6 +85,10 @@ class DownloadingItemWidget(QWidget):
 
         # 根据初始状态设置按钮文本
         self.update_status(status) # status string might be "等待中" which maps to 'waiting' logic if passed as 'waiting'
+
+    def set_cover_image(self, pixmap):
+        if not pixmap.isNull():
+            self.icon_label.setPixmap(pixmap)
 
     def update_progress(self, current, total, status_text):
         self.current_progress = current
@@ -100,7 +133,7 @@ class FinishedItemWidget(QWidget):
     open_folder_signal = Signal(str) # path
     delete_signal = Signal(str) # task_id
     
-    def __init__(self, task_id, title, filepath, parent=None):
+    def __init__(self, task_id, title, filepath, cover_url=None, parent=None):
         super().__init__(parent)
         self.task_id = task_id
         self.filepath = filepath
@@ -110,9 +143,15 @@ class FinishedItemWidget(QWidget):
         
         # 图标
         self.icon_label = QLabel()
-        self.icon_label.setFixedSize(40, 40)
-        self.icon_label.setStyleSheet("background-color: #E0E0E0; border-radius: 5px;")
+        self.icon_label.setFixedSize(40, 53)
+        self.icon_label.setStyleSheet("background-color: #E0E0E0; border-radius: 3px;")
+        self.icon_label.setScaledContents(True)
         layout.addWidget(self.icon_label)
+
+        if cover_url:
+            self.loader = ImageLoaderThread(cover_url)
+            self.loader.loaded.connect(self.set_cover_image)
+            self.loader.start()
         
         # 信息
         info_layout = QVBoxLayout()
@@ -134,6 +173,10 @@ class FinishedItemWidget(QWidget):
         self.btn_del = QPushButton("删除记录")
         self.btn_del.clicked.connect(lambda: self.delete_signal.emit(self.task_id))
         layout.addWidget(self.btn_del)
+
+    def set_cover_image(self, pixmap):
+        if not pixmap.isNull():
+            self.icon_label.setPixmap(pixmap)
         
     def on_open_clicked(self):
         if os.path.exists(self.filepath):
@@ -327,9 +370,9 @@ class DownloadManagerWindow(QWidget):
             self.btn_downloading.setStyleSheet(self.btn_style_normal)
             self.btn_finished.setStyleSheet(self.btn_style_active)
 
-    def add_downloading_item(self, task_id, title):
+    def add_downloading_item(self, task_id, title, cover_url=None):
         item = QListWidgetItem(self.list_downloading)
-        widget = DownloadingItemWidget(task_id, title)
+        widget = DownloadingItemWidget(task_id, title, cover_url=cover_url)
         item.setSizeHint(widget.sizeHint())
         self.list_downloading.addItem(item)
         self.list_downloading.setItemWidget(item, widget)
@@ -363,9 +406,9 @@ class DownloadManagerWindow(QWidget):
                 widget.update_status(status)
                 return
                 
-    def add_finished_item(self, task_id, title, filepath):
+    def add_finished_item(self, task_id, title, filepath, cover_url=None):
         item = QListWidgetItem(self.list_finished)
-        widget = FinishedItemWidget(task_id, title, filepath)
+        widget = FinishedItemWidget(task_id, title, filepath, cover_url=cover_url)
         item.setSizeHint(widget.sizeHint())
         self.list_finished.addItem(item)
         self.list_finished.setItemWidget(item, widget)

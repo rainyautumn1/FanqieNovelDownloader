@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup
 import time
 import os
 import re
+import json
 import random
 from ebooklib import epub
 from abc import ABC, abstractmethod
@@ -23,7 +24,7 @@ class BookFormatter(ABC):
         pass
 
     @abstractmethod
-    def initialize(self, book_data, save_dir, split_files, append_mode=False):
+    def initialize(self, book_data, save_dir, split_files, append_mode=False, downloader=None):
         """
         初始化保存环境。
         返回: context (上下文对象，用于后续步骤)
@@ -90,8 +91,9 @@ class TxtFormatter(BookFormatter):
                     pass
         return last_index
 
-    def initialize(self, book_data, save_dir, split_files, append_mode=False):
+    def initialize(self, book_data, save_dir, split_files, append_mode=False, downloader=None):
         context = {
+            'downloader': downloader,
             'book_data': book_data,
             'save_dir': save_dir,
             'split_files': split_files,
@@ -109,6 +111,8 @@ class TxtFormatter(BookFormatter):
             intro_path = os.path.join(book_folder, "000_简介.txt")
             if not append_mode or not os.path.exists(intro_path):
                 with open(intro_path, 'w', encoding='utf-8') as f:
+                    if book_data.get('cover_url'):
+                        f.write(f"[封面: {book_data['cover_url']}]\n\n")
                     f.write(f"Title: {book_data['title']}\n")
                     f.write(f"Author: {book_data['author']}\n")
                     f.write("="*20 + "\n\n")
@@ -121,6 +125,8 @@ class TxtFormatter(BookFormatter):
             f = open(filepath, mode, encoding='utf-8')
             
             if not append_mode:
+                if book_data.get('cover_url'):
+                    f.write(f"[封面: {book_data['cover_url']}]\n\n")
                 f.write(f"Title: {book_data['title']}\n")
                 f.write(f"Author: {book_data['author']}\n")
                 f.write("="*20 + "\n\n")
@@ -135,6 +141,19 @@ class TxtFormatter(BookFormatter):
         return context
 
     def write_chapter(self, context, chapter_data, content, index):
+        # 转换内容列表为字符串
+        text_content = ""
+        if isinstance(content, str):
+             text_content = content
+        else:
+             lines = []
+             for item in content:
+                 if item['type'] == 'text':
+                     lines.append(item['data'])
+                 elif item['type'] == 'image':
+                     lines.append(f"[图片: {item['data']}]")
+             text_content = "\n\n".join(lines)
+
         if context['split_files']:
             # 分文件
             safe_title = re.sub(r'[\\/*?:"<>|]', "", chapter_data['title'])
@@ -142,13 +161,13 @@ class TxtFormatter(BookFormatter):
             filepath = os.path.join(context['target_dir'], filename)
             
             with open(filepath, 'w', encoding='utf-8') as f:
-                f.write(content)
+                f.write(text_content)
             context['files_created'].append(filepath)
         else:
             # 单文件
             f = context['file_handle']
             f.write(f"\n\n=== {chapter_data['title']} ===\n\n")
-            f.write(content)
+            f.write(text_content)
 
     def finalize(self, context):
         if context['split_files']:
@@ -192,8 +211,9 @@ class MdFormatter(BookFormatter):
                     pass
         return last_index
 
-    def initialize(self, book_data, save_dir, split_files, append_mode=False):
+    def initialize(self, book_data, save_dir, split_files, append_mode=False, downloader=None):
         context = {
+            'downloader': downloader,
             'book_data': book_data,
             'save_dir': save_dir,
             'split_files': split_files,
@@ -209,6 +229,8 @@ class MdFormatter(BookFormatter):
             intro_path = os.path.join(book_folder, "000_简介.md")
             if not append_mode or not os.path.exists(intro_path):
                 with open(intro_path, 'w', encoding='utf-8') as f:
+                    if book_data.get('cover_url'):
+                        f.write(f"![封面]({book_data['cover_url']})\n\n")
                     f.write(f"# {book_data['title']}\n")
                     f.write(f"**Author:** {book_data['author']}\n\n")
                     f.write("## 简介\n\n")
@@ -220,6 +242,8 @@ class MdFormatter(BookFormatter):
             f = open(filepath, mode, encoding='utf-8')
             
             if not append_mode:
+                if book_data.get('cover_url'):
+                    f.write(f"![封面]({book_data['cover_url']})\n\n")
                 f.write(f"# {book_data['title']}\n")
                 f.write(f"**Author:** {book_data['author']}\n\n")
                 f.write("## 简介\n\n")
@@ -234,6 +258,19 @@ class MdFormatter(BookFormatter):
         return context
 
     def write_chapter(self, context, chapter_data, content, index):
+        # 转换内容列表为字符串
+        text_content = ""
+        if isinstance(content, str):
+             text_content = content
+        else:
+             lines = []
+             for item in content:
+                 if item['type'] == 'text':
+                     lines.append(item['data'])
+                 elif item['type'] == 'image':
+                     lines.append(f"![image]({item['data']})")
+             text_content = "\n\n".join(lines)
+
         if context['split_files']:
             safe_title = re.sub(r'[\\/*?:"<>|]', "", chapter_data['title'])
             filename = f"{index+1:03d}_{safe_title}.md"
@@ -241,12 +278,12 @@ class MdFormatter(BookFormatter):
             
             with open(filepath, 'w', encoding='utf-8') as f:
                 f.write(f"# {chapter_data['title']}\n\n")
-                f.write(content)
+                f.write(text_content)
             context['files_created'].append(filepath)
         else:
             f = context['file_handle']
             f.write(f"## {chapter_data['title']}\n\n")
-            f.write(content)
+            f.write(text_content)
             f.write("\n\n")
 
     def finalize(self, context):
@@ -260,9 +297,24 @@ class EpubFormatter(BookFormatter):
     def detect_existing_progress(self, book_data, save_dir, split_files):
         return -1
 
-    def initialize(self, book_data, save_dir, split_files, append_mode=False):
+    def initialize(self, book_data, save_dir, split_files, append_mode=False, downloader=None):
         # EPUB 忽略 split_files
         book = epub.EpubBook()
+
+        # 设置封面
+        if book_data.get('cover_url') and downloader:
+            try:
+                cover_data = downloader.get_image_content(book_data['cover_url'])
+                if cover_data:
+                    # 获取扩展名
+                    ext = 'jpg'
+                    if '.png' in book_data['cover_url']: ext = 'png'
+                    elif '.gif' in book_data['cover_url']: ext = 'gif'
+                    
+                    book.set_cover(f"cover.{ext}", cover_data)
+            except Exception as e:
+                print(f"设置封面失败: {e}")
+
         book.set_identifier(f'fanqie-{int(time.time())}')
         book.set_title(book_data['title'])
         book.set_language('zh')
@@ -281,6 +333,7 @@ class EpubFormatter(BookFormatter):
         toc.append(c_intro)
         
         return {
+            'downloader': downloader,
             'book': book,
             'spine': spine,
             'toc': toc,
@@ -289,7 +342,46 @@ class EpubFormatter(BookFormatter):
         }
 
     def write_chapter(self, context, chapter_data, content, index):
-        html_content = "".join([f"<p>{line}</p>" for line in content.split('\n\n')])
+        html_parts = []
+        
+        if isinstance(content, str):
+            html_parts = [f"<p>{line}</p>" for line in content.split('\n\n')]
+        else:
+            img_idx = 0
+            for item in content:
+                if item['type'] == 'text':
+                    html_parts.append(f"<p>{item['data']}</p>")
+                elif item['type'] == 'image':
+                    img_url = item['data']
+                    if context.get('downloader'):
+                        img_data = context['downloader'].get_image_content(img_url)
+                        if img_data:
+                            # Determine extension
+                            ext = 'jpg'
+                            if '.png' in img_url: ext = 'png'
+                            elif '.gif' in img_url: ext = 'gif'
+                            elif '.webp' in img_url: ext = 'webp'
+                            elif '.jpeg' in img_url: ext = 'jpg'
+                            
+                            img_filename = f"img_{index+1}_{img_idx}.{ext}"
+                            
+                            # Create EpubImage
+                            epub_img = epub.EpubImage()
+                            epub_img.file_name = img_filename
+                            epub_img.media_type = f'image/{ext}'
+                            epub_img.content = img_data
+                            
+                            # Add to book
+                            context['book'].add_item(epub_img)
+                            
+                            html_parts.append(f'<img src="{img_filename}" alt="image" />')
+                            img_idx += 1
+                        else:
+                            html_parts.append(f'<p>[图片下载失败: {img_url}]</p>')
+                    else:
+                        html_parts.append(f'<p>[图片: {img_url}]</p>')
+
+        html_content = "".join(html_parts)
         c = epub.EpubHtml(title=chapter_data['title'], file_name=f'chap_{index+1}.xhtml', lang='zh')
         c.content = f'<h1>{chapter_data["title"]}</h1>{html_content}'
         
@@ -358,6 +450,22 @@ class FanqieDownloader:
             decoded.append(self.decode_char(ord(char)))
         return "".join(decoded)
 
+    def get_image_content(self, url):
+        """
+        下载图片内容
+        """
+        try:
+            # 简单的防盗链处理
+            headers = self.headers.copy()
+            headers['Referer'] = 'https://fanqienovel.com/'
+            
+            response = requests.get(url, headers=headers, cookies=self.cookies, timeout=30)
+            response.raise_for_status()
+            return response.content
+        except Exception as e:
+            # 静默失败，返回None
+            return None
+
     def get_book_info(self, url):
         """
         获取书籍信息和章节列表。
@@ -403,14 +511,83 @@ class FanqieDownloader:
                 'title': title,
                 'author': author,
                 'introduction': introduction,
-                'chapters': chapters
+                'chapters': chapters,
+                'cover_url': self._get_cover_url(soup)
             }
         except Exception as e:
             raise Exception(f"获取书籍信息失败: {str(e)}")
 
+    def _get_cover_url(self, soup):
+        """
+        提取封面图片URL
+        """
+        try:
+            # 1. 优先从 JSON-LD 数据中获取（通常包含高清、无水印且正确的封面）
+            scripts = soup.find_all('script', type='application/ld+json')
+            for script in scripts:
+                if not script.string:
+                    continue
+                try:
+                    data = json.loads(script.string)
+                    # 统一处理为列表
+                    items = data if isinstance(data, list) else [data]
+                    
+                    for item in items:
+                        # 检查 image 字段
+                        if 'image' in item:
+                            img = item['image']
+                            if isinstance(img, list) and img:
+                                return img[0]
+                            elif isinstance(img, str) and img:
+                                return img
+                        # 检查 images 字段 (部分 schema 使用此字段)
+                        if 'images' in item:
+                            img = item['images']
+                            if isinstance(img, list) and img:
+                                return img[0]
+                            elif isinstance(img, str) and img:
+                                return img
+                except:
+                    continue
+
+            # 2. 尝试从 script 中正则匹配（作为 JSON-LD 的补充）
+            # 匹配类似 "https://...novel-pic..." 的链接
+            scripts = soup.find_all('script')
+            for script in scripts:
+                if script.string and 'novel-pic' in script.string:
+                    urls = re.findall(r'https?://[^"\'\s]+novel-pic[^"\'\s]+', script.string)
+                    if urls:
+                        # 过滤掉转义字符
+                        clean_url = urls[0].replace('\\u002F', '/').replace('\\', '')
+                        return clean_url
+
+            # 3. 尝试 CSS 选择器，但要过滤掉默认占位图
+            img = soup.select_one('.book-cover-img') or \
+                  soup.select_one('.book-img img') or \
+                  soup.select_one('.page-header-left img')
+            
+            if img:
+                src = img.get('src')
+                if src:
+                    # 处理相对路径或无协议的URL
+                    if src.startswith('//'):
+                        full_src = 'https:' + src
+                    elif src.startswith('/'):
+                        full_src = 'https://fanqienovel.com' + src
+                    else:
+                        full_src = src
+                    
+                    # 过滤占位图 (novel-static 通常是静态资源或占位图)
+                    if 'novel-static' not in full_src:
+                        return full_src
+        except Exception as e:
+            print(f"提取封面出错: {e}")
+        return None
+
     def get_chapter_content(self, url):
         """
         获取并解码单个章节的内容。
+        返回: list of dict {'type': 'text'|'image', 'data': str}
         """
         try:
             response = requests.get(url, headers=self.headers, cookies=self.cookies)
@@ -431,22 +608,71 @@ class FanqieDownloader:
                     raise VerificationError("检测到验证码或风控页面")
                 
                 # 如果只是 VIP 锁定，通常会有特定的提示，这里简单处理
-                return "未找到内容或内容被锁定（VIP章节）。"
+                return [{"type": "text", "data": "未找到内容或内容被锁定（VIP章节）。"}]
 
-            # 提取段落
-            paragraphs = content_div.find_all('p')
-            decoded_paragraphs = []
-            
-            for p in paragraphs:
-                raw_text = p.get_text()
-                decoded_text = self.decode_text(raw_text)
-                decoded_paragraphs.append(decoded_text)
-            
-            return "\n\n".join(decoded_paragraphs)
+            # 提取内容（文本和图片）
+            return self._extract_content_recursively(content_div)
         except VerificationError:
             raise
         except Exception as e:
-            return f"获取章节出错: {str(e)}"
+            return [{"type": "text", "data": f"获取章节出错: {str(e)}"}]
+
+    def _extract_content_recursively(self, element):
+        """
+        递归提取元素内容，保持顺序
+        """
+        items = []
+        # 处理 element 自身就是 img 的情况 (虽然在 children 循环中不会出现，但为了通用性)
+        if element.name == 'img':
+            src = element.get('src')
+            if src:
+                return [{'type': 'image', 'data': src}]
+            return []
+
+        # 遍历子节点
+        for child in element.children:
+            if not child.name:
+                # 处理直接的文本节点 (NavigableString)
+                raw_text = str(child)
+                decoded_text = self.decode_text(raw_text)
+                if decoded_text.strip():
+                    items.append({'type': 'text', 'data': decoded_text})
+                continue
+                
+            if child.name == 'p':
+                # 检查 p 标签内是否有图片
+                imgs = child.find_all('img')
+                if imgs:
+                    # 如果 p 标签内混杂了图片，为了保持顺序，我们需要递归处理 p 标签
+                    items.extend(self._extract_content_recursively(child))
+                else:
+                    # 普通文本段落
+                    raw_text = child.get_text()
+                    decoded_text = self.decode_text(raw_text)
+                    if decoded_text.strip():
+                        items.append({'type': 'text', 'data': decoded_text})
+            
+            elif child.name == 'img':
+                src = child.get('src')
+                if src:
+                    items.append({'type': 'image', 'data': src})
+                    
+            elif child.name == 'div':
+                # 递归处理 div
+                items.extend(self._extract_content_recursively(child))
+                
+            else:
+                # 其他标签（如 span, strong 等），如果包含图片则递归，否则提取文本
+                imgs = child.find_all('img')
+                if imgs:
+                    items.extend(self._extract_content_recursively(child))
+                else:
+                    raw_text = child.get_text()
+                    decoded_text = self.decode_text(raw_text)
+                    if decoded_text.strip():
+                        items.append({'type': 'text', 'data': decoded_text})
+                        
+        return items
 
     def get_rank_categories(self):
         """
@@ -686,7 +912,7 @@ class FanqieDownloader:
         total_chapters = len(valid_indices)
         
         # 1. 初始化
-        context = formatter.initialize(book_data, save_dir, split_files, append_mode)
+        context = formatter.initialize(book_data, save_dir, split_files, append_mode, downloader=self)
         
         try:
             # 2. 循环下载

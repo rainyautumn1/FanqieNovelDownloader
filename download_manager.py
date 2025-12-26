@@ -14,9 +14,13 @@ class DownloadTask:
         self.progress = (0, 0)
         self.status_msg = ""
         self.filepath = ""
+        self.cover_url = kwargs.get('cover_url', None)
         
-        # 提取标题
+        # 提取标题和封面
         if task_type == 'single':
+            if not self.cover_url and kwargs.get('book_info'):
+                self.cover_url = kwargs.get('book_info').get('cover_url')
+
             if kwargs.get('title'):
                  self.title = kwargs.get('title')
             elif kwargs.get('book_info'):
@@ -28,10 +32,10 @@ class DownloadTask:
             self.title = "批量下载任务"
 
 class DownloadManager(QObject):
-    task_added = Signal(str, str) # id, title
+    task_added = Signal(str, str, str) # id, title, cover_url
     task_updated = Signal(str, int, int, str) # id, current, total, msg
     task_status_changed = Signal(str, str) # id, status
-    task_finished = Signal(str, str, str) # id, title, filepath
+    task_finished = Signal(str, str, str, str) # id, title, filepath, cover_url
     task_removed = Signal(str) # id
     verification_needed = Signal(str, str) # id, url
     
@@ -44,7 +48,7 @@ class DownloadManager(QObject):
         self.queue_timer = QTimer()
         self.queue_timer.timeout.connect(self.process_queue)
         self.queue_timer.start(1000) # 每秒检查一次队列
-        
+
     def set_max_concurrent_tasks(self, count):
         self.max_concurrent_tasks = count
         # 设置变更后立即检查队列
@@ -67,7 +71,7 @@ class DownloadManager(QObject):
         self._setup_worker(task, worker)
         
         self.tasks.append(task)
-        self.task_added.emit(task.id, task.title)
+        self.task_added.emit(task.id, task.title, task.cover_url)
         return task.id
         
     def add_batch_task(self, rank_url, save_dir, top_n=5, chapters_count=0, fmt='txt', split_files=False, delay=-1):
@@ -84,7 +88,7 @@ class DownloadManager(QObject):
         self._setup_worker(task, worker)
         
         self.tasks.append(task)
-        self.task_added.emit(task.id, task.title)
+        self.task_added.emit(task.id, task.title, task.cover_url)
         return task.id
 
     def _setup_worker(self, task, worker):
@@ -150,7 +154,7 @@ class DownloadManager(QObject):
             task.status = 'finished'
             task.filepath = filepath
             self.task_status_changed.emit(task_id, 'finished')
-            self.task_finished.emit(task_id, task.title, filepath)
+            self.task_finished.emit(task_id, task.title, filepath, task.cover_url)
             # 自动从运行列表中移除逻辑由 UI 处理，Manager 保留记录直到显式清除
             
     def _on_worker_error(self, task_id, err_msg):
@@ -238,12 +242,15 @@ class DownloadManager(QObject):
         # 如果当前没有运行的，process_queue 会自动启动一个
 
     def pause_all(self):
+        changed = False
         for t in self.tasks:
             if t.status == 'running':
                 self.pause_task(t.id)
+                changed = True
             elif t.status == 'waiting':
                 t.status = 'paused'
                 self.task_status_changed.emit(t.id, 'paused')
+                changed = True
 
     def cancel_all(self):
         # 复制列表进行遍历，因为 cancel_task 会修改列表

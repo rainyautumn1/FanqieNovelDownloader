@@ -108,8 +108,8 @@ class MainWindow(QMainWindow):
         # 在UI更新时传递标题
         self.download_window.update_downloading_item(task_id, current, total, msg, title)
 
-    def on_task_added(self, task_id, title):
-        widget = self.download_window.add_downloading_item(task_id, title)
+    def on_task_added(self, task_id, title, cover_url):
+        widget = self.download_window.add_downloading_item(task_id, title, cover_url=cover_url)
         # 连接单个任务的操作信号
         widget.action_triggered.connect(self.handle_task_action)
         
@@ -124,11 +124,11 @@ class MainWindow(QMainWindow):
         elif action == 'cancel':
             self.download_manager.cancel_task(task_id)
 
-    def on_task_finished(self, task_id, title, filepath):
+    def on_task_finished(self, task_id, title, filepath, cover_url):
         # 移除正在下载列表
         self.download_window.remove_downloading_item(task_id)
         # 添加到完成列表
-        widget = self.download_window.add_finished_item(task_id, title, filepath)
+        widget = self.download_window.add_finished_item(task_id, title, filepath, cover_url=cover_url)
         # 连接完成项的操作信号
         widget.open_folder_signal.connect(self.open_file_folder)
         widget.delete_signal.connect(self.delete_finished_record)
@@ -848,7 +848,7 @@ class MainWindow(QMainWindow):
 
     def open_bilibili_link(self):
         import webbrowser
-        webbrowser.open("https://space.bilibili.com/3493264627943530")
+        webbrowser.open("https://space.bilibili.com/16111026")
 
     def show_faq(self):
         dialog = FAQDialog(self)
