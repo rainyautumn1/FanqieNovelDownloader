@@ -3,6 +3,8 @@ from bs4 import BeautifulSoup
 import time
 import os
 import re
+import json
+import html
 import random
 from ebooklib import epub
 from abc import ABC, abstractmethod
@@ -23,7 +25,7 @@ class BookFormatter(ABC):
         pass
 
     @abstractmethod
-    def initialize(self, book_data, save_dir, split_files, append_mode=False):
+    def initialize(self, book_data, save_dir, split_files, append_mode=False, downloader=None):
         """
         初始化保存环境。
         返回: context (上下文对象，用于后续步骤)
@@ -90,8 +92,9 @@ class TxtFormatter(BookFormatter):
                     pass
         return last_index
 
-    def initialize(self, book_data, save_dir, split_files, append_mode=False):
+    def initialize(self, book_data, save_dir, split_files, append_mode=False, downloader=None):
         context = {
+            'downloader': downloader,
             'book_data': book_data,
             'save_dir': save_dir,
             'split_files': split_files,
@@ -109,6 +112,8 @@ class TxtFormatter(BookFormatter):
             intro_path = os.path.join(book_folder, "000_简介.txt")
             if not append_mode or not os.path.exists(intro_path):
                 with open(intro_path, 'w', encoding='utf-8') as f:
+                    if book_data.get('cover_url'):
+                        f.write(f"[封面: {book_data['cover_url']}]\n\n")
                     f.write(f"Title: {book_data['title']}\n")
                     f.write(f"Author: {book_data['author']}\n")
                     f.write("="*20 + "\n\n")
@@ -121,6 +126,8 @@ class TxtFormatter(BookFormatter):
             f = open(filepath, mode, encoding='utf-8')
             
             if not append_mode:
+                if book_data.get('cover_url'):
+                    f.write(f"[封面: {book_data['cover_url']}]\n\n")
                 f.write(f"Title: {book_data['title']}\n")
                 f.write(f"Author: {book_data['author']}\n")
                 f.write("="*20 + "\n\n")
@@ -135,6 +142,19 @@ class TxtFormatter(BookFormatter):
         return context
 
     def write_chapter(self, context, chapter_data, content, index):
+        # 转换内容列表为字符串
+        text_content = ""
+        if isinstance(content, str):
+             text_content = content
+        else:
+             lines = []
+             for item in content:
+                 if item['type'] == 'text':
+                     lines.append(item['data'])
+                 elif item['type'] == 'image':
+                     lines.append(f"[图片: {item['data']}]")
+             text_content = "\n\n".join(lines)
+
         if context['split_files']:
             # 分文件
             safe_title = re.sub(r'[\\/*?:"<>|]', "", chapter_data['title'])
@@ -142,13 +162,13 @@ class TxtFormatter(BookFormatter):
             filepath = os.path.join(context['target_dir'], filename)
             
             with open(filepath, 'w', encoding='utf-8') as f:
-                f.write(content)
+                f.write(text_content)
             context['files_created'].append(filepath)
         else:
             # 单文件
             f = context['file_handle']
             f.write(f"\n\n=== {chapter_data['title']} ===\n\n")
-            f.write(content)
+            f.write(text_content)
 
     def finalize(self, context):
         if context['split_files']:
@@ -192,8 +212,9 @@ class MdFormatter(BookFormatter):
                     pass
         return last_index
 
-    def initialize(self, book_data, save_dir, split_files, append_mode=False):
+    def initialize(self, book_data, save_dir, split_files, append_mode=False, downloader=None):
         context = {
+            'downloader': downloader,
             'book_data': book_data,
             'save_dir': save_dir,
             'split_files': split_files,
@@ -209,6 +230,8 @@ class MdFormatter(BookFormatter):
             intro_path = os.path.join(book_folder, "000_简介.md")
             if not append_mode or not os.path.exists(intro_path):
                 with open(intro_path, 'w', encoding='utf-8') as f:
+                    if book_data.get('cover_url'):
+                        f.write(f"![封面]({book_data['cover_url']})\n\n")
                     f.write(f"# {book_data['title']}\n")
                     f.write(f"**Author:** {book_data['author']}\n\n")
                     f.write("## 简介\n\n")
@@ -220,6 +243,8 @@ class MdFormatter(BookFormatter):
             f = open(filepath, mode, encoding='utf-8')
             
             if not append_mode:
+                if book_data.get('cover_url'):
+                    f.write(f"![封面]({book_data['cover_url']})\n\n")
                 f.write(f"# {book_data['title']}\n")
                 f.write(f"**Author:** {book_data['author']}\n\n")
                 f.write("## 简介\n\n")
@@ -234,6 +259,19 @@ class MdFormatter(BookFormatter):
         return context
 
     def write_chapter(self, context, chapter_data, content, index):
+        # 转换内容列表为字符串
+        text_content = ""
+        if isinstance(content, str):
+             text_content = content
+        else:
+             lines = []
+             for item in content:
+                 if item['type'] == 'text':
+                     lines.append(item['data'])
+                 elif item['type'] == 'image':
+                     lines.append(f"![image]({item['data']})")
+             text_content = "\n\n".join(lines)
+
         if context['split_files']:
             safe_title = re.sub(r'[\\/*?:"<>|]', "", chapter_data['title'])
             filename = f"{index+1:03d}_{safe_title}.md"
@@ -241,12 +279,12 @@ class MdFormatter(BookFormatter):
             
             with open(filepath, 'w', encoding='utf-8') as f:
                 f.write(f"# {chapter_data['title']}\n\n")
-                f.write(content)
+                f.write(text_content)
             context['files_created'].append(filepath)
         else:
             f = context['file_handle']
             f.write(f"## {chapter_data['title']}\n\n")
-            f.write(content)
+            f.write(text_content)
             f.write("\n\n")
 
     def finalize(self, context):
@@ -260,9 +298,134 @@ class EpubFormatter(BookFormatter):
     def detect_existing_progress(self, book_data, save_dir, split_files):
         return -1
 
-    def initialize(self, book_data, save_dir, split_files, append_mode=False):
+    def initialize(self, book_data, save_dir, split_files, append_mode=False, downloader=None):
         # EPUB 忽略 split_files
         book = epub.EpubBook()
+
+        # 定义 CSS 样式
+        style = '''
+        @font-face {
+            font-family: "Source Han Serif SC";
+            src: url("fonts/SourceHanSerifSC-Regular.otf");
+            font-weight: normal;
+            font-style: normal;
+        }
+        body {
+            font-family: "Source Han Serif SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+            line-height: 1.8;
+            text-align: justify;
+            margin: 0;
+            padding: 0;
+        }
+        p {
+            text-indent: 2em;
+            margin-bottom: 0.8em;
+            margin-top: 0;
+        }
+        h1 {
+            text-align: center;
+            font-weight: bold;
+            margin-top: 2em;
+            margin-bottom: 1.5em;
+            color: #333;
+            page-break-before: always;
+        }
+        h2 {
+            text-align: center;
+            font-weight: bold;
+            margin-top: 1.5em;
+            margin-bottom: 1em;
+            color: #555;
+        }
+        .intro-page {
+            text-indent: 0;
+            padding: 20px;
+            margin: 20px;
+            border: 1px solid #ddd;
+            background-color: #f9f9f9;
+            border-radius: 5px;
+        }
+        .intro-title {
+            text-align: center;
+            font-size: 1.5em;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        .intro-info {
+            text-align: center;
+            color: #666;
+            margin-bottom: 20px;
+            font-size: 0.9em;
+        }
+        .intro-content {
+            line-height: 1.6;
+            color: #444;
+        }
+        img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+            margin: 10px auto;
+            border-radius: 3px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .cover-img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+            margin: 0 auto;
+        }
+        /* 目录样式 */
+        .toc-page {
+            padding: 0 10px;
+        }
+        .toc-title {
+            text-align: center;
+            font-size: 1.6em;
+            font-weight: bold;
+            margin-top: 1em;
+            margin-bottom: 1.5em;
+            color: #333;
+        }
+        .toc-list {
+            list-style-type: none;
+            padding: 0;
+            margin: 0;
+        }
+        .toc-item {
+            margin-bottom: 5px;
+            border-bottom: 1px dashed #f0f0f0;
+        }
+        .toc-item a {
+            display: block;
+            text-decoration: none;
+            color: #444;
+            padding: 10px 5px;
+            font-size: 0.95em;
+            transition: color 0.2s, background-color 0.2s;
+        }
+        .toc-item a:hover {
+            color: #d32f2f;
+            background-color: #fafafa;
+        }
+        '''
+        nav_css = epub.EpubItem(uid="style_nav", file_name="style/nav.css", media_type="text/css", content=style)
+        book.add_item(nav_css)
+
+        # 设置封面
+        if book_data.get('cover_url') and downloader:
+            try:
+                cover_data = downloader.get_image_content(book_data['cover_url'])
+                if cover_data:
+                    # 获取扩展名
+                    ext = 'jpg'
+                    if '.png' in book_data['cover_url']: ext = 'png'
+                    elif '.gif' in book_data['cover_url']: ext = 'gif'
+                    
+                    book.set_cover(f"cover.{ext}", cover_data)
+            except Exception as e:
+                print(f"设置封面失败: {e}")
+
         book.set_identifier(f'fanqie-{int(time.time())}')
         book.set_title(book_data['title'])
         book.set_language('zh')
@@ -272,26 +435,79 @@ class EpubFormatter(BookFormatter):
         spine = []
         toc = []
         
-        # 简介
-        intro_content = book_data.get('introduction', '').replace('\n', '<br/>')
-        c_intro = epub.EpubHtml(title='简介', file_name='intro.xhtml', lang='zh')
-        c_intro.content = f'<h1>简介</h1><p>{intro_content}</p>'
+        # 简介 (美化版)
+        intro_text = book_data.get('introduction', '')
+        intro_content = html.escape(intro_text).replace('\n', '<br/>')
+        intro_html = f'''
+        <div class="intro-page">
+            <div class="intro-title">{html.escape(book_data['title'])}</div>
+            <div class="intro-info">作者：{html.escape(book_data['author'])}</div>
+            <hr style="border: 0; border-top: 1px solid #eee; margin: 15px 0;">
+            <div class="intro-content">{intro_content}</div>
+        </div>
+        '''
+        c_intro = epub.EpubHtml(title='书籍信息', file_name='intro.xhtml', lang='zh')
+        c_intro.content = intro_html
+        c_intro.add_item(nav_css) # 引用样式
+        
         book.add_item(c_intro)
         spine.append(c_intro)
         toc.append(c_intro)
         
         return {
+            'downloader': downloader,
             'book': book,
             'spine': spine,
             'toc': toc,
             'save_dir': save_dir,
-            'title': book_data['title']
+            'title': book_data['title'],
+            'css': nav_css
         }
 
     def write_chapter(self, context, chapter_data, content, index):
-        html_content = "".join([f"<p>{line}</p>" for line in content.split('\n\n')])
+        html_parts = []
+        
+        if isinstance(content, str):
+            html_parts = [f"<p>{html.escape(line)}</p>" for line in content.split('\n\n')]
+        else:
+            img_idx = 0
+            for item in content:
+                if item['type'] == 'text':
+                    html_parts.append(f"<p>{html.escape(item['data'])}</p>")
+                elif item['type'] == 'image':
+                    img_url = item['data']
+                    if context.get('downloader'):
+                        img_data = context['downloader'].get_image_content(img_url)
+                        if img_data:
+                            # Determine extension
+                            ext = 'jpg'
+                            if '.png' in img_url: ext = 'png'
+                            elif '.gif' in img_url: ext = 'gif'
+                            elif '.webp' in img_url: ext = 'webp'
+                            elif '.jpeg' in img_url: ext = 'jpg'
+                            
+                            img_filename = f"img_{index+1}_{img_idx}.{ext}"
+                            
+                            # Create EpubImage
+                            epub_img = epub.EpubImage()
+                            epub_img.file_name = img_filename
+                            epub_img.media_type = f'image/{ext}'
+                            epub_img.content = img_data
+                            
+                            # Add to book
+                            context['book'].add_item(epub_img)
+                            
+                            html_parts.append(f'<img src="{img_filename}" alt="image" />')
+                            img_idx += 1
+                        else:
+                            html_parts.append(f'<p>[图片下载失败: {html.escape(img_url)}]</p>')
+                    else:
+                        html_parts.append(f'<p>[图片: {html.escape(img_url)}]</p>')
+
+        html_content = "".join(html_parts)
         c = epub.EpubHtml(title=chapter_data['title'], file_name=f'chap_{index+1}.xhtml', lang='zh')
-        c.content = f'<h1>{chapter_data["title"]}</h1>{html_content}'
+        c.content = f'<h1>{html.escape(chapter_data["title"])}</h1>{html_content}'
+        c.add_item(context['css']) # 引用样式
         
         context['book'].add_item(c)
         context['spine'].append(c)
@@ -301,8 +517,42 @@ class EpubFormatter(BookFormatter):
         book = context['book']
         book.toc = context['toc']
         book.add_item(epub.EpubNcx())
-        book.add_item(epub.EpubNav())
-        book.spine = ['nav'] + context['spine']
+        
+        # 生成自定义目录页 (HTML)
+        toc_html_parts = [
+            '<div class="toc-page">',
+            '<div class="toc-title">目录</div>',
+            '<ul class="toc-list">'
+        ]
+        
+        for item in context['toc']:
+            # item 是 EpubHtml 对象
+            link = item.file_name
+            title = item.title
+            toc_html_parts.append(f'<li class="toc-item"><a href="{link}">{html.escape(title)}</a></li>')
+            
+        toc_html_parts.append('</ul></div>')
+        
+        c_toc = epub.EpubHtml(title='目录', file_name='toc.xhtml', lang='zh')
+        c_toc.content = "\n".join(toc_html_parts)
+        c_toc.add_item(context['css'])
+        
+        # 添加到书籍项目
+        book.add_item(c_toc)
+        
+        # 调整 Spine 顺序: 插入到 Intro 之后 (index 1)
+        # 假设 context['spine'] 的第一个是 Intro
+        if len(context['spine']) > 0:
+            context['spine'].insert(1, c_toc)
+        else:
+            context['spine'].append(c_toc)
+        
+        # 添加标准的 Nav 文件 (用于阅读器导航菜单，但不放入 linear spine)
+        nav = epub.EpubNav()
+        book.add_item(nav)
+        
+        # 设置 Spine
+        book.spine = context['spine']
         
         filename = f"{context['title']}.epub"
         filepath = os.path.join(context['save_dir'], filename)
@@ -313,10 +563,27 @@ class EpubFormatter(BookFormatter):
 
 class FanqieDownloader:
     def __init__(self, cookies=None):
-        self.headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept-Language': 'en-US,en;q=0.9',
-        }
+        self.headers = {}
+        
+        # 生成高熵随机 User-Agent
+        self.headers['User-Agent'] = self._generate_random_ua()
+        
+        # 基础 Headers
+        self.headers.update({
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6',
+            'Connection': 'keep-alive',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'same-origin',
+            'Sec-Fetch-User': '?1',
+            'Upgrade-Insecure-Requests': '1',
+            'Cache-Control': 'max-age=0',
+        })
+        
+        # 根据随机生成的 UA 动态调整 Client Hints
+        self._update_client_hints()
+        
         self.cookies = cookies
         # 字符集来自研究（番茄小说混淆映射）
         # 注意：此映射可能会随时间变化。
@@ -345,6 +612,90 @@ class FanqieDownloader:
             'W', '用', '方', '子', '英', '每', '理', '便', '西', '数', '期', '中', 'C', '外', '样', 'a', '海', '们', '任'
         ]
 
+    def _generate_random_ua(self):
+        """生成随机的高拟真 User-Agent"""
+        browsers = ['Chrome', 'Edge', 'Firefox', 'Safari']
+        weights = [0.6, 0.2, 0.15, 0.05] # Chrome 最常见
+        browser = random.choices(browsers, weights=weights)[0]
+        
+        os_type = random.choice(['Windows', 'Mac'])
+        
+        if os_type == 'Windows':
+            platform = 'Windows NT 10.0; Win64; x64'
+        else:
+            mac_versions = ['10_15_7', '11_6', '12_6', '13_5', '14_1']
+            platform = f'Macintosh; Intel Mac OS X {random.choice(mac_versions)}'
+
+        if browser == 'Chrome':
+            # Chrome 115-122
+            version_major = random.randint(115, 122)
+            version_minor = 0
+            version_build = random.randint(1000, 6000)
+            version_patch = random.randint(0, 200)
+            version = f"{version_major}.{version_minor}.{version_build}.{version_patch}"
+            return f"Mozilla/5.0 ({platform}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{version} Safari/537.36"
+            
+        elif browser == 'Edge':
+            # Edge 115-122
+            if os_type == 'Mac': # Edge on Mac exists but let's stick to Windows for Edge to be safe/common
+                return self._generate_random_ua()
+                
+            version_major = random.randint(115, 122)
+            version_build = random.randint(1000, 6000)
+            version = f"{version_major}.0.{version_build}.0"
+            return f"Mozilla/5.0 ({platform}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{version} Safari/537.36 Edg/{version}"
+
+        elif browser == 'Firefox':
+            # Firefox 110-123
+            version = random.randint(110, 123)
+            # Gecko trail
+            gecko_date = 20100101
+            return f"Mozilla/5.0 ({platform}; rv:{version}.0) Gecko/{gecko_date} Firefox/{version}.0"
+
+        elif browser == 'Safari':
+            if os_type == 'Windows': # Safari on Windows is dead
+                 return self._generate_random_ua()
+            
+            # Safari 16-17
+            version_major = random.randint(16, 17)
+            version_minor = random.randint(0, 6)
+            webkit_ver = "605.1.15"
+            return f"Mozilla/5.0 ({platform}) AppleWebKit/{webkit_ver} (KHTML, like Gecko) Version/{version_major}.{version_minor} Safari/{webkit_ver}"
+            
+        return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+    def _update_client_hints(self):
+        """根据 User-Agent 动态设置 Sec-CH-UA 头部"""
+        ua = self.headers['User-Agent']
+        
+        # 提取平台
+        platform = '"Windows"'
+        if 'Macintosh' in ua:
+            platform = '"macOS"'
+        elif 'Linux' in ua:
+            platform = '"Linux"'
+            
+        # 提取版本和品牌
+        if 'Edg/' in ua:
+            # Edge
+            match = re.search(r'Edg/(\d+)', ua)
+            ver = match.group(1) if match else "120"
+            self.headers['Sec-CH-UA'] = f'"Not_A Brand";v="8", "Chromium";v="{ver}", "Microsoft Edge";v="{ver}"'
+            self.headers['Sec-CH-UA-Mobile'] = '?0'
+            self.headers['Sec-CH-UA-Platform'] = platform
+        elif 'Chrome/' in ua:
+            # Chrome
+            match = re.search(r'Chrome/(\d+)', ua)
+            ver = match.group(1) if match else "120"
+            self.headers['Sec-CH-UA'] = f'"Not_A Brand";v="8", "Chromium";v="{ver}", "Google Chrome";v="{ver}"'
+            self.headers['Sec-CH-UA-Mobile'] = '?0'
+            self.headers['Sec-CH-UA-Platform'] = platform
+        else:
+            # Firefox/Safari
+            self.headers.pop('Sec-CH-UA', None)
+            self.headers.pop('Sec-CH-UA-Mobile', None)
+            self.headers.pop('Sec-CH-UA-Platform', None)
+
     def decode_char(self, char_code):
         if self.code_start <= char_code <= self.code_end:
             bias = char_code - self.code_start
@@ -357,6 +708,22 @@ class FanqieDownloader:
         for char in text:
             decoded.append(self.decode_char(ord(char)))
         return "".join(decoded)
+
+    def get_image_content(self, url):
+        """
+        下载图片内容
+        """
+        try:
+            # 简单的防盗链处理
+            headers = self.headers.copy()
+            headers['Referer'] = 'https://fanqienovel.com/'
+            
+            response = requests.get(url, headers=headers, cookies=self.cookies, timeout=30)
+            response.raise_for_status()
+            return response.content
+        except Exception as e:
+            # 静默失败，返回None
+            return None
 
     def get_book_info(self, url):
         """
@@ -403,14 +770,83 @@ class FanqieDownloader:
                 'title': title,
                 'author': author,
                 'introduction': introduction,
-                'chapters': chapters
+                'chapters': chapters,
+                'cover_url': self._get_cover_url(soup)
             }
         except Exception as e:
             raise Exception(f"获取书籍信息失败: {str(e)}")
 
+    def _get_cover_url(self, soup):
+        """
+        提取封面图片URL
+        """
+        try:
+            # 1. 优先从 JSON-LD 数据中获取（通常包含高清、无水印且正确的封面）
+            scripts = soup.find_all('script', type='application/ld+json')
+            for script in scripts:
+                if not script.string:
+                    continue
+                try:
+                    data = json.loads(script.string)
+                    # 统一处理为列表
+                    items = data if isinstance(data, list) else [data]
+                    
+                    for item in items:
+                        # 检查 image 字段
+                        if 'image' in item:
+                            img = item['image']
+                            if isinstance(img, list) and img:
+                                return img[0]
+                            elif isinstance(img, str) and img:
+                                return img
+                        # 检查 images 字段 (部分 schema 使用此字段)
+                        if 'images' in item:
+                            img = item['images']
+                            if isinstance(img, list) and img:
+                                return img[0]
+                            elif isinstance(img, str) and img:
+                                return img
+                except:
+                    continue
+
+            # 2. 尝试从 script 中正则匹配（作为 JSON-LD 的补充）
+            # 匹配类似 "https://...novel-pic..." 的链接
+            scripts = soup.find_all('script')
+            for script in scripts:
+                if script.string and 'novel-pic' in script.string:
+                    urls = re.findall(r'https?://[^"\'\s]+novel-pic[^"\'\s]+', script.string)
+                    if urls:
+                        # 过滤掉转义字符
+                        clean_url = urls[0].replace('\\u002F', '/').replace('\\', '')
+                        return clean_url
+
+            # 3. 尝试 CSS 选择器，但要过滤掉默认占位图
+            img = soup.select_one('.book-cover-img') or \
+                  soup.select_one('.book-img img') or \
+                  soup.select_one('.page-header-left img')
+            
+            if img:
+                src = img.get('src')
+                if src:
+                    # 处理相对路径或无协议的URL
+                    if src.startswith('//'):
+                        full_src = 'https:' + src
+                    elif src.startswith('/'):
+                        full_src = 'https://fanqienovel.com' + src
+                    else:
+                        full_src = src
+                    
+                    # 过滤占位图 (novel-static 通常是静态资源或占位图)
+                    if 'novel-static' not in full_src:
+                        return full_src
+        except Exception as e:
+            print(f"提取封面出错: {e}")
+        return None
+
     def get_chapter_content(self, url):
         """
         获取并解码单个章节的内容。
+        返回: list of dict {'type': 'text'|'image', 'data': str}
         """
         try:
             response = requests.get(url, headers=self.headers, cookies=self.cookies)
@@ -431,22 +867,71 @@ class FanqieDownloader:
                     raise VerificationError("检测到验证码或风控页面")
                 
                 # 如果只是 VIP 锁定，通常会有特定的提示，这里简单处理
-                return "未找到内容或内容被锁定（VIP章节）。"
+                return [{"type": "text", "data": "未找到内容或内容被锁定（VIP章节）。"}]
 
-            # 提取段落
-            paragraphs = content_div.find_all('p')
-            decoded_paragraphs = []
-            
-            for p in paragraphs:
-                raw_text = p.get_text()
-                decoded_text = self.decode_text(raw_text)
-                decoded_paragraphs.append(decoded_text)
-            
-            return "\n\n".join(decoded_paragraphs)
+            # 提取内容（文本和图片）
+            return self._extract_content_recursively(content_div)
         except VerificationError:
             raise
         except Exception as e:
-            return f"获取章节出错: {str(e)}"
+            return [{"type": "text", "data": f"获取章节出错: {str(e)}"}]
+
+    def _extract_content_recursively(self, element):
+        """
+        递归提取元素内容，保持顺序
+        """
+        items = []
+        # 处理 element 自身就是 img 的情况 (虽然在 children 循环中不会出现，但为了通用性)
+        if element.name == 'img':
+            src = element.get('src')
+            if src:
+                return [{'type': 'image', 'data': src}]
+            return []
+
+        # 遍历子节点
+        for child in element.children:
+            if not child.name:
+                # 处理直接的文本节点 (NavigableString)
+                raw_text = str(child)
+                decoded_text = self.decode_text(raw_text)
+                if decoded_text.strip():
+                    items.append({'type': 'text', 'data': decoded_text})
+                continue
+                
+            if child.name == 'p':
+                # 检查 p 标签内是否有图片
+                imgs = child.find_all('img')
+                if imgs:
+                    # 如果 p 标签内混杂了图片，为了保持顺序，我们需要递归处理 p 标签
+                    items.extend(self._extract_content_recursively(child))
+                else:
+                    # 普通文本段落
+                    raw_text = child.get_text()
+                    decoded_text = self.decode_text(raw_text)
+                    if decoded_text.strip():
+                        items.append({'type': 'text', 'data': decoded_text})
+            
+            elif child.name == 'img':
+                src = child.get('src')
+                if src:
+                    items.append({'type': 'image', 'data': src})
+                    
+            elif child.name == 'div':
+                # 递归处理 div
+                items.extend(self._extract_content_recursively(child))
+                
+            else:
+                # 其他标签（如 span, strong 等），如果包含图片则递归，否则提取文本
+                imgs = child.find_all('img')
+                if imgs:
+                    items.extend(self._extract_content_recursively(child))
+                else:
+                    raw_text = child.get_text()
+                    decoded_text = self.decode_text(raw_text)
+                    if decoded_text.strip():
+                        items.append({'type': 'text', 'data': decoded_text})
+                        
+        return items
 
     def get_rank_categories(self):
         """
@@ -686,7 +1171,7 @@ class FanqieDownloader:
         total_chapters = len(valid_indices)
         
         # 1. 初始化
-        context = formatter.initialize(book_data, save_dir, split_files, append_mode)
+        context = formatter.initialize(book_data, save_dir, split_files, append_mode, downloader=self)
         
         try:
             # 2. 循环下载

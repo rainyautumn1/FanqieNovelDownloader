@@ -1,18 +1,38 @@
 # 番茄小说下载器 (Fanqie Novel Downloader)
 
 [![License](https://img.shields.io/github/license/rainyautumn1/FanqieNovelDownloader?style=flat-square)](LICENSE)
-[![Changelog](https://img.shields.io/badge/Changelog-View%20Updates-blue?style=flat-square)](CHANGELOG.md)
+[![GitHub release (latest by date)](https://img.shields.io/github/v/release/rainyautumn1/FanqieNovelDownloader?style=flat-square)](https://github.com/rainyautumn1/FanqieNovelDownloader/releases)
+[![GitHub stars](https://img.shields.io/github/stars/rainyautumn1/FanqieNovelDownloader?style=social)](https://github.com/rainyautumn1/FanqieNovelDownloader/stargazers)
 ![Python](https://img.shields.io/badge/Python-3.8%2B-blue)
 ![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey)
 
-## 简介
+> **📥 [点击下载最新 Windows 绿色版 (.exe)](https://github.com/rainyautumn1/FanqieNovelDownloader/releases)**  
+> *解压即用，无需安装 Python 环境*
+
+## 📖 简介
 这是一个基于 Python (PySide6) 开发的高级**番茄小说下载工具**（Tomato Novel Downloader）。
 它集成了内置浏览器，支持用户直接浏览**番茄小说网 (番茄免费小说)**，支持 **SVIP 账号登录**以获取完整内容。
 软件提供灵活的**单本下载**与**榜单批量下载**功能，支持将小说导出为 **TXT**、**EPUB**、**Markdown** 等格式，是您备份和离线阅读番茄小说的最佳助手。
 
 **核心关键词**: 番茄小说下载, 番茄免费小说, 小说爬虫, 批量下载, 导出EPUB, TXT下载, 离线阅读, 电子书制作
 
-**⚠️ 重要免责声明**
+---
+
+## 📸 软件截图 (Screenshots)
+
+| **主界面 / 内置浏览器** | **批量下载 / 任务管理** |
+|:---:|:---:|
+| <img src="docs/image/主程序.png" alt="主程序" width="100%"> | <img src="docs/image/下载管理界面.png" alt="下载管理界面" width="100%"> |
+| *内置浏览器直接阅读与下载* | *多任务并发与实时进度监控* |
+
+| **自动更新** |
+|:---:|
+| <img src="docs/image/自动更新界面.png" alt="自动更新界面" width="100%"> |
+| *支持自动检测更新与安装* |
+
+---
+
+## ⚠️ 重要免责声明**
 1. **仅供学习研究**: 本工具仅供个人学习 Python 网络爬虫技术、GUI 开发及研究使用。
 2. **版权声明**: 请尊重小说作者及平台的版权。**严禁**使用本工具进行任何形式的商业盈利、非法传播或侵犯知识产权的行为。
 3. **责任自负**: 使用本工具产生的任何法律后果由使用者自行承担。
@@ -62,6 +82,12 @@
 - **字符反混淆 (Anti-Obfuscation)**: 内置特定算法，自动还原被网站混淆的字体字符。
 - **多线程处理**: 界面操作与下载任务分离，下载过程中界面不卡顿。
 - **实时反馈**: 底部状态栏和日志窗口实时显示当前的下载进度、速度及错误信息。
+
+---
+
+## 📈 Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=rainyautumn1/FanqieNovelDownloader&type=Date)](https://star-history.com/#rainyautumn1/FanqieNovelDownloader&Date)
 
 ---
 

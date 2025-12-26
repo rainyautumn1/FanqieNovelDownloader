@@ -55,6 +55,13 @@ class MainWindow(QMainWindow):
 
         self.setup_ui()
         
+        # === 同步 User-Agent (确保指纹一致性) ===
+        # 获取下载器随机生成的 User-Agent
+        random_ua = self.downloader.headers.get('User-Agent')
+        if random_ua:
+            self.web_view.page().profile().setHttpUserAgent(random_ua)
+            # logging.info(f"Synced User-Agent: {random_ua}")
+        
         # 显式显示开源声明弹窗 (只在第一次显示，或者每次启动都显示？用户要求显著标记，建议放在主界面上方或弹窗)
         # 这里选择在 UI 初始化后，在主界面顶部添加一个显著的 Banner
         
@@ -98,6 +105,7 @@ class MainWindow(QMainWindow):
         self.download_manager.task_status_changed.connect(self.download_window.update_downloading_item_status)
         self.download_manager.task_finished.connect(self.on_task_finished)
         self.download_manager.task_removed.connect(self.download_window.remove_downloading_item)
+        self.download_manager.cover_updated.connect(self.download_window.update_downloading_item_cover)
         self.download_manager.verification_needed.connect(self.on_verification_needed)
 
     def on_task_updated(self, task_id, current, total, msg):
@@ -108,8 +116,8 @@ class MainWindow(QMainWindow):
         # 在UI更新时传递标题
         self.download_window.update_downloading_item(task_id, current, total, msg, title)
 
-    def on_task_added(self, task_id, title):
-        widget = self.download_window.add_downloading_item(task_id, title)
+    def on_task_added(self, task_id, title, cover_url):
+        widget = self.download_window.add_downloading_item(task_id, title, cover_url=cover_url)
         # 连接单个任务的操作信号
         widget.action_triggered.connect(self.handle_task_action)
         
@@ -124,11 +132,11 @@ class MainWindow(QMainWindow):
         elif action == 'cancel':
             self.download_manager.cancel_task(task_id)
 
-    def on_task_finished(self, task_id, title, filepath):
+    def on_task_finished(self, task_id, title, filepath, cover_url):
         # 移除正在下载列表
         self.download_window.remove_downloading_item(task_id)
         # 添加到完成列表
-        widget = self.download_window.add_finished_item(task_id, title, filepath)
+        widget = self.download_window.add_finished_item(task_id, title, filepath, cover_url=cover_url)
         # 连接完成项的操作信号
         widget.open_folder_signal.connect(self.open_file_folder)
         widget.delete_signal.connect(self.delete_finished_record)
@@ -848,7 +856,7 @@ class MainWindow(QMainWindow):
 
     def open_bilibili_link(self):
         import webbrowser
-        webbrowser.open("https://space.bilibili.com/3493264627943530")
+        webbrowser.open("https://space.bilibili.com/16111026")
 
     def show_faq(self):
         dialog = FAQDialog(self)
