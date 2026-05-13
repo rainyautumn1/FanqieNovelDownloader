@@ -15,6 +15,8 @@ on:
 jobs:
   build:
     runs-on: macos-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -73,6 +75,34 @@ jobs:
           name: FanqieNovelDownloader-macOS
           path: FanqieNovelDownloader-macOS.zip
           retention-days: 30
+
+      - name: Extract version
+        run: |
+          APP_VERSION=$(python -c "from version import VERSION; print(VERSION)")
+          echo "APP_VERSION=$APP_VERSION" >> $GITHUB_ENV
+          echo "Version: $APP_VERSION"
+
+      - name: Publish to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "macOS v${{ env.APP_VERSION }}"
+          tag_name: "mac-v${{ env.APP_VERSION }}"
+          files: FanqieNovelDownloader-macOS.zip
+          draft: false
+          prerelease: true
+          body: |
+            ## 番茄小说下载器 macOS 版本
+
+            这是自动构建的 macOS 版本，基于 PyInstaller 打包。
+
+            ### 使用方法
+            1. 下载 `FanqieNovelDownloader-macOS.zip`
+            2. 解压后双击 `FanqieNovelDownloader` 或在终端运行 `./FanqieNovelDownloader`
+            3. 如提示"无法验证开发者"，请前往 **系统设置 → 隐私与安全性 → 仍要打开**
+
+            ### 注意事项
+            - 本版本为自动构建，未经过完整测试
+            - 如有问题请在 [Issues](https://github.com/rainyautumn1/FanqieNovelDownloader/issues) 反馈
 
       - name: Run headless smoke test
         run: |
