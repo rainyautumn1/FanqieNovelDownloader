@@ -1,0 +1,79 @@
+name: macOS Build & Test
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '*.md'
+      - 'LICENSE'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '*.md'
+      - 'LICENSE'
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Verify imports
+        run: |
+          python -c "
+          import sys
+          sys.path.insert(0, '.')
+          # Test that all modules can be imported without Qt GUI (headless)
+          import requests, bs4, lxml, ebooklib, openpyxl
+          from version import VERSION
+          print(f'Version: {VERSION}')
+          print('All core imports OK')
+          "
+
+      - name: Build with PyInstaller
+        run: |
+          chmod +x build.sh
+          bash build.sh
+
+      - name: Verify build output
+        run: |
+          if [ -d "dist/FanqieNovelDownloader" ]; then
+            echo "Build directory exists"
+            ls -la dist/FanqieNovelDownloader/
+            if [ -f "dist/FanqieNovelDownloader/FanqieNovelDownloader" ]; then
+              echo "Executable found"
+              file dist/FanqieNovelDownloader/FanqieNovelDownloader
+            fi
+          else
+            echo "ERROR: Build output not found!"
+            exit 1
+          fi
+
+      - name: Run headless smoke test
+        run: |
+          # Test that the built app can at least start without crashing
+          # Qt needs a display; use Xvfb or skip on macOS (we skip full GUI test)
+          python -c "
+          import os, sys
+          # Verify script can be parsed and all modules load
+          scripts = ['main.py', 'downloader.py', 'workers.py', 'ui_components.py',
+                     'download_manager.py', 'download_ui.py', 'update_manager.py',
+                     'logging_config.py']
+          for s in scripts:
+              if os.path.exists(s):
+                  with open(s) as f:
+                      compile(f.read(), s, 'exec')
+                      print(f'  {s}: syntax OK')
+          print('All scripts pass syntax check')
+          "

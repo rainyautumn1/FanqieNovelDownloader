@@ -27,7 +27,8 @@ class MainWindow(QMainWindow):
         self.resize(1200, 800)
 
         # 设置窗口图标
-        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'app.ico')
+        icon_name = 'app.ico' if sys.platform == 'win32' else 'app.icns'
+        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), icon_name)
         if os.path.exists(icon_path):
             from PySide6.QtGui import QIcon
             QApplication.instance().setWindowIcon(QIcon(icon_path))
@@ -225,7 +226,14 @@ class MainWindow(QMainWindow):
 
     def open_file_folder(self, path):
         try:
-            os.startfile(path)
+            if sys.platform == 'win32':
+                os.startfile(path)
+            elif sys.platform == 'darwin':
+                import subprocess
+                subprocess.run(['open', path])
+            else:
+                import subprocess
+                subprocess.run(['xdg-open', path])
         except Exception as e:
             self.log(f"无法打开文件夹: {e}")
 
@@ -868,13 +876,14 @@ if __name__ == "__main__":
     if hasattr(Qt, 'AA_UseHighDpiPixmaps'):
         QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
 
-    # 设置 AppUserModelID 以便任务栏图标正确显示
-    try:
-        from ctypes import windll
-        myappid = f'rainyautumn.fanqienoveldownloader.gui.{VERSION}'
-        windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
-    except ImportError:
-        pass
+    # 设置 AppUserModelID 以便任务栏图标正确显示 (仅 Windows)
+    if sys.platform == 'win32':
+        try:
+            from ctypes import windll
+            myappid = f'rainyautumn.fanqienoveldownloader.gui.{VERSION}'
+            windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+        except ImportError:
+            pass
 
     app = QApplication(sys.argv)
     window = MainWindow()
