@@ -4,9 +4,10 @@
 [![GitHub release (latest by date)](https://img.shields.io/github/v/release/rainyautumn1/FanqieNovelDownloader?style=flat-square)](https://github.com/rainyautumn1/FanqieNovelDownloader/releases)
 [![GitHub stars](https://img.shields.io/github/stars/rainyautumn1/FanqieNovelDownloader?style=social)](https://github.com/rainyautumn1/FanqieNovelDownloader/stargazers)
 ![Python](https://img.shields.io/badge/Python-3.8%2B-blue)
-![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey)
+![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS-lightgrey)
 
 > **📥 [点击下载最新 Windows 绿色版 (.exe)](https://github.com/rainyautumn1/FanqieNovelDownloader/releases)**  
+> **🍎 [点击下载最新 macOS 版本 (.zip)](https://github.com/rainyautumn1/FanqieNovelDownloader/releases/tag/mac-v1.1.3)**  
 > *解压即用，无需安装 Python 环境*
 
 ## 📖 简介
@@ -115,6 +116,9 @@ pip install -r requirements.txt
 # Windows 用户推荐直接运行
 run.bat
 
+# macOS 用户
+chmod +x run.sh && ./run.sh
+
 # 或手动运行
 python main.py
 ```
@@ -152,9 +156,12 @@ python main.py
 - **没有PYTHON环境？**
   - 查询百度或者bilibili有各种安装教程
 - **有没有不用安装Python环境的运行办法？**
-  - Windows用户下载Release中的.exe版本，安装后即可运行
+  - **Windows**：下载 Release 中的 `.exe` 版本，解压后即可运行
+  - **macOS**：下载 [Release](https://github.com/rainyautumn1/FanqieNovelDownloader/releases/tag/mac-v1.1.3) 中的 `FanqieNovelDownloader-macOS.zip`，解压后终端运行 `./FanqieNovelDownloader`
 - **有没有MAC/Linux/Android运行方法？**
-  - 暂时没有做，可以自行下载源代码编译运行
+  - **macOS**：已支持！可下载 [Releases](https://github.com/rainyautumn1/FanqieNovelDownloader/releases/tag/mac-v1.1.3) 中的 macOS 版本，或运行 `run.sh` 从源码启动
+  - **Linux**：可自行下载源码运行 `python main.py`，需要安装 PySide6 及相关依赖
+  - **Android**：暂不支持
 - **为什么出现验证码弹窗？**
   - 这是番茄的反爬策略。**最新版本已解决此问题**：
   - 当程序检测到验证码时，会自动暂停下载任务并弹出提示。
