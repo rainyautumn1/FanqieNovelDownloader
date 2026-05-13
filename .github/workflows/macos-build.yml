@@ -60,13 +60,24 @@ jobs:
             exit 1
           fi
 
+      - name: Package as zip for distribution
+        run: |
+          cd dist
+          zip -r ../FanqieNovelDownloader-macOS.zip FanqieNovelDownloader/
+          cd ..
+          ls -lh FanqieNovelDownloader-macOS.zip
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FanqieNovelDownloader-macOS
+          path: FanqieNovelDownloader-macOS.zip
+          retention-days: 30
+
       - name: Run headless smoke test
         run: |
-          # Test that the built app can at least start without crashing
-          # Qt needs a display; use Xvfb or skip on macOS (we skip full GUI test)
           python -c "
           import os, sys
-          # Verify script can be parsed and all modules load
           scripts = ['main.py', 'downloader.py', 'workers.py', 'ui_components.py',
                      'download_manager.py', 'download_ui.py', 'update_manager.py',
                      'logging_config.py']
